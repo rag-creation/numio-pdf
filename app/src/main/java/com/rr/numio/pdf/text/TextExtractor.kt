@@ -212,6 +212,7 @@ class TextExtractor(private val context: Context, private val source: Uri) {
         return Mark(
             page, MarkKind.TEXT, listOf(box), color, a.contents ?: "",
             Mark.savedId(page, ref), ref, fontSize = (points / geo.shownWidth).coerceIn(0.005f, 0.2f),
+            fill = a.cosObject.getInt(COSName.getPDFName("NumioFill"), -1),
         )
     }
 

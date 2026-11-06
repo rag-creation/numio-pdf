@@ -16,6 +16,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,14 +45,16 @@ fun WriteDialog(
     initialText: String,
     initialColor: Int,
     initialSize: Int?,
+    initialFill: Boolean,
     isNew: Boolean,
-    onDone: (text: String, color: Int, size: Int) -> Unit,
+    onDone: (text: String, color: Int, size: Int, fill: Boolean) -> Unit,
     onDelete: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     var text by remember { mutableStateOf(initialText) }
     var color by remember { mutableIntStateOf(initialColor) }
     var size by remember { mutableIntStateOf(initialSize ?: 0) }
+    var fill by remember { mutableStateOf(initialFill) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Numio.Surface,
@@ -107,6 +111,32 @@ fun WriteDialog(
                         }
                     }
                 }
+                if (initialSize != null) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(role = Role.Switch) { fill = !fill }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("White background", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "Covers what's underneath, like correction tape. It's hidden, not removed from the file.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Switch(
+                            checked = fill,
+                            onCheckedChange = { fill = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Numio.OnAmber,
+                                checkedTrackColor = Numio.Amber,
+                            ),
+                        )
+                    }
+                }
                 if (onDelete != null) {
                     Text(
                         "Delete",
@@ -121,7 +151,7 @@ fun WriteDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onDone(text.trimEnd(), color, size) }, enabled = text.isNotBlank()) {
+            TextButton(onClick = { onDone(text.trimEnd(), color, size, fill) }, enabled = text.isNotBlank()) {
                 Text(if (isNew) "Add" else "Save", color = if (text.isNotBlank()) Numio.Amber else Numio.TextDim)
             }
         },

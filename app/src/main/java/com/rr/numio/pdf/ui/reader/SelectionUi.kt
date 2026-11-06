@@ -141,6 +141,7 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                     TextBox.draw(
                         drawContext.canvas.nativeCanvas, m.text, m.fontSize * size.width,
                         0xFF000000.toInt() or m.color, b.left * size.width, b.top * size.height,
+                        m.fill, b.width() * size.width, b.height() * size.height,
                     )
                 }
                 MarkKind.NOTE -> drawNote(m.boxes.first(), c)

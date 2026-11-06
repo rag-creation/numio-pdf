@@ -263,6 +263,9 @@ object PdfSaver {
         a.contents = m.text
         a.cosObject.setString(COSName.DA, "/Helv ${n(points)} Tf ${n(c[0])} ${n(c[1])} ${n(c[2])} rg")
         a.cosObject.setItem(COSName.BS, COSDictionary().apply { setFloat(COSName.W, 0f) })
+        // Remembered so PDF Reader can show and change the background later.
+        // Other apps see it anyway, in the picture of the text box.
+        if (m.fill >= 0) a.cosObject.setInt(COSName.getPDFName("NumioFill"), m.fill)
         a.isPrinted = true
         a.setModifiedDate(Calendar.getInstance())
 
@@ -271,7 +274,10 @@ object PdfSaver {
         val wPx = (box.width() * geo.shownWidth * scale).toInt().coerceIn(1, 4096)
         val hPx = (box.height() * geo.shownHeight * scale).toInt().coerceIn(1, 4096)
         var bitmap = Bitmap.createBitmap(wPx, hPx, Bitmap.Config.ARGB_8888)
-        TextBox.draw(Canvas(bitmap), m.text, points * scale, 0xFF000000.toInt() or m.color, 0f, 0f)
+        TextBox.draw(
+            Canvas(bitmap), m.text, points * scale, 0xFF000000.toInt() or m.color, 0f, 0f,
+            m.fill, wPx.toFloat(), hPx.toFloat(),
+        )
         if (geo.turnDegrees != 0) {
             // The page is shown turned, so turn the picture back the other way
             val turned = Bitmap.createBitmap(

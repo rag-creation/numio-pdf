@@ -484,8 +484,9 @@ fun ReaderScreen(
             initialColor = old?.color ?: if (d.kind == MarkKind.NOTE) noteColor else textColor,
             initialSize = if (d.kind == MarkKind.NOTE) null
             else old?.let { o -> Mark.fontSizes.indices.minByOrNull { kotlin.math.abs(Mark.fontSizes[it] - o.fontSize) } } ?: textSize,
+            initialFill = (old?.fill ?: -1) >= 0,
             isNew = old == null,
-            onDone = { text, color, size ->
+            onDone = { text, color, size, fill ->
                 val mark = if (d.kind == MarkKind.NOTE) {
                     noteColor = color
                     Mark(d.page, MarkKind.NOTE, listOf(TextBox.noteBox(d.x, d.y, aspect, centred = old == null)), color, text)
@@ -495,7 +496,7 @@ fun ReaderScreen(
                     val fs = Mark.fontSizes[size]
                     Mark(
                         d.page, MarkKind.TEXT, listOf(TextBox.box(text, fs, d.x, d.y, aspect, centred = old == null)),
-                        color, text, fontSize = fs,
+                        color, text, fontSize = fs, fill = if (fill) 0xFFFFFF else -1,
                     )
                 }
                 if (old == null) {
