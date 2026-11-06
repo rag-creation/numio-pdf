@@ -67,8 +67,25 @@ object TextBox {
         }
     }
 
-    /** Draws [text] with its top-left at ([left], [top]); [fontPx] is the text size in pixels. */
-    fun draw(canvas: Canvas, text: String, fontPx: Float, color: Int, left: Float, top: Float) {
+    /**
+     * Draws [text] with its top-left at ([left], [top]); [fontPx] is the text size
+     * in pixels. With a [fill] colour, the whole [width] × [height] box is painted first.
+     */
+    fun draw(
+        canvas: Canvas,
+        text: String,
+        fontPx: Float,
+        color: Int,
+        left: Float,
+        top: Float,
+        fill: Int = -1,
+        width: Float = 0f,
+        height: Float = 0f,
+    ) {
+        if (fill >= 0 && width > 0f && height > 0f) {
+            val bg = Paint().apply { this.color = 0xFF000000.toInt() or fill }
+            canvas.drawRect(left, top, left + width, top + height, bg)
+        }
         val p = paint(fontPx, color)
         val pad = PAD * fontPx
         val ascent = -p.fontMetrics.ascent

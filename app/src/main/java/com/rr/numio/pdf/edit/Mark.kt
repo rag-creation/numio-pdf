@@ -32,6 +32,8 @@ data class Mark(
     val width: Float = 0f,
     /** Text size for [MarkKind.TEXT], as a fraction of the page width. */
     val fontSize: Float = 0f,
+    /** Background behind a text box (0xRRGGBB), or -1 for none. Covers what's under it. */
+    val fill: Int = -1,
 ) {
     val saved: Boolean get() = ref >= 0
 
