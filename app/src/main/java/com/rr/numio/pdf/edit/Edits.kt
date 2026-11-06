@@ -7,6 +7,8 @@ sealed interface Edit {
     data class Recolor(val mark: Mark, val color: Int) : Edit
     /** Anything else changed, like a text box's words, size or place. Same [Mark.id]. */
     data class Change(val mark: Mark, val new: Mark) : Edit
+    /** A form field filled in: [field] is its full name, [value] the text / choice / "Off". */
+    data class Fill(val field: String, val value: String) : Edit
 }
 
 /** What saving has to do to the file, worked out from the list of edits. */
@@ -17,8 +19,10 @@ data class SavePlan(
     val removed: List<Mark>,
     /** Marks already in the file with a new colour (in [Mark.color]). */
     val recolored: List<Mark>,
+    /** Form fields to fill: full name to value. */
+    val fills: Map<String, String> = emptyMap(),
 ) {
-    val isEmpty: Boolean get() = added.isEmpty() && removed.isEmpty() && recolored.isEmpty()
+    val isEmpty: Boolean get() = added.isEmpty() && removed.isEmpty() && recolored.isEmpty() && fills.isEmpty()
 }
 
 /**
@@ -43,6 +47,7 @@ object Edits {
                     val i = marks.indexOfFirst { it.id == e.mark.id }
                     if (i >= 0) marks[i] = e.new.copy(id = e.mark.id, ref = marks[i].ref)
                 }
+                is Edit.Fill -> Unit
             }
         }
         return marks
@@ -52,6 +57,7 @@ object Edits {
         val added = LinkedHashMap<Long, Mark>()
         val removed = LinkedHashMap<Long, Mark>()
         val recolored = LinkedHashMap<Long, Mark>()
+        val fills = LinkedHashMap<String, String>()
         for (e in edits) {
             when (e) {
                 is Edit.Add -> added[e.mark.id] = e.mark
@@ -70,6 +76,7 @@ object Edits {
                         e.mark.saved && id !in removed -> recolored[id] = e.mark.copy(color = e.color)
                     }
                 }
+                is Edit.Fill -> fills[e.field] = e.value
                 // A changed saved mark is saved as: remove the old one, add the new one
                 is Edit.Change -> {
                     val id = e.mark.id
@@ -85,6 +92,13 @@ object Edits {
                 }
             }
         }
-        return SavePlan(added.values.toList(), removed.values.toList(), recolored.values.toList())
+        return SavePlan(added.values.toList(), removed.values.toList(), recolored.values.toList(), fills)
+    }
+
+    /** Form values filled since the last save (latest wins), to show over the file's own. */
+    fun fills(edits: List<Edit>): Map<String, String> {
+        val out = HashMap<String, String>()
+        edits.forEach { if (it is Edit.Fill) out[it.field] = it.value }
+        return out
     }
 }
