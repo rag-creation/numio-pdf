@@ -19,10 +19,18 @@ object ColorSample {
         if (r <= l || b <= t) return 0xFFFFFF to 0x000000
 
         // Background: the most common colour around the edge of the box
+        // (grouped loosely), then the exact average of that group, so a
+        // cover painted in it doesn't show as a slightly different patch
         val counts = HashMap<Int, Int>()
+        val sums = HashMap<Int, LongArray>()
         fun count(x: Int, y: Int) {
-            val c = quantise(pixels[y * width + x])
+            val p = pixels[y * width + x]
+            val c = quantise(p)
             counts[c] = (counts[c] ?: 0) + 1
+            val s = sums.getOrPut(c) { LongArray(3) }
+            s[0] += ((p shr 16) and 0xFF).toLong()
+            s[1] += ((p shr 8) and 0xFF).toLong()
+            s[2] += (p and 0xFF).toLong()
         }
         for (x in l..r) {
             count(x, t)
@@ -32,7 +40,10 @@ object ColorSample {
             count(l, y)
             count(r, y)
         }
-        val background = counts.maxByOrNull { it.value }?.key ?: 0xFFFFFF
+        val group = counts.maxByOrNull { it.value } ?: return 0xFFFFFF to 0x000000
+        val s = sums.getValue(group.key)
+        val n = group.value.toLong()
+        val background = ((s[0] / n).toInt() shl 16) or ((s[1] / n).toInt() shl 8) or (s[2] / n).toInt()
 
         // Text: the colour inside the box furthest from the background
         var text = if (luminance(background) > 0.5f) 0x000000 else 0xFFFFFF
