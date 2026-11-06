@@ -132,11 +132,15 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                         size = Size(right - left, thick),
                     )
                     // Preview until saved: the old words hidden behind the page's own white
-                    MarkKind.REPLACE -> drawRect(
-                        color = if (m.fill >= 0) Color(0xFF000000.toInt() or m.fill) else Color.White,
-                        topLeft = Offset(left, top),
-                        size = Size(right - left, bottom - top),
-                    )
+                    // A little taller than the letters so no tops or tails peek out
+                    MarkKind.REPLACE -> {
+                        val grow = (bottom - top) * 0.15f
+                        drawRect(
+                            color = if (m.fill >= 0) Color(0xFF000000.toInt() or m.fill) else Color.White,
+                            topLeft = Offset(left - grow * 0.3f, top - grow),
+                            size = Size(right - left + grow * 0.6f, bottom - top + grow * 2f),
+                        )
+                    }
                     MarkKind.INK, MarkKind.TEXT, MarkKind.NOTE -> Unit // drawn below
                 }
             }

@@ -16,7 +16,7 @@ class ColorSampleTest {
         val red = 0xB83A4B
         val px = image(40, 20, red, 0xFFFFFF, intArrayOf(10, 6, 30, 14))
         val (bg, text) = ColorSample.colors(px, 40, 20, 5, 2, 35, 18)
-        assertEquals(red and 0xF8F8F8, bg)
+        assertEquals(red, bg)
         assertEquals(0xFFFFFF, text)
     }
 
@@ -24,7 +24,7 @@ class ColorSampleTest {
     fun blackTextOnWhite() {
         val px = image(40, 20, 0xFFFFFF, 0x111111, intArrayOf(10, 6, 30, 14))
         val (bg, text) = ColorSample.colors(px, 40, 20, 5, 2, 35, 18)
-        assertEquals(0xF8F8F8, bg)
+        assertEquals(0xFFFFFF, bg)
         assertEquals(0x111111, text)
     }
 
