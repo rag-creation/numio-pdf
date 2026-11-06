@@ -131,6 +131,12 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                         topLeft = Offset(left, (top + bottom) / 2f - thick / 2f),
                         size = Size(right - left, thick),
                     )
+                    // Preview until saved: the old words hidden behind the page's own white
+                    MarkKind.REPLACE -> drawRect(
+                        color = Color.White,
+                        topLeft = Offset(left, top),
+                        size = Size(right - left, bottom - top),
+                    )
                     MarkKind.INK, MarkKind.TEXT, MarkKind.NOTE -> Unit // drawn below
                 }
             }
@@ -145,6 +151,14 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                     )
                 }
                 MarkKind.NOTE -> drawNote(m.boxes.first(), c)
+                MarkKind.REPLACE -> if (m.text.isNotEmpty()) {
+                    val b = m.boxes.first()
+                    TextBox.draw(
+                        drawContext.canvas.nativeCanvas, m.text, m.fontSize * size.width,
+                        0xFF000000.toInt(), b.left * size.width - m.fontSize * size.width * 0.35f,
+                        b.top * size.height - m.fontSize * size.width * 0.2f,
+                    )
+                }
                 else -> Unit
             }
         }
@@ -283,6 +297,8 @@ fun SelectionBar(
     onCopy: () -> Unit,
     onShare: () -> Unit,
     onSelectPage: () -> Unit,
+    onReplace: () -> Unit,
+    onRemove: () -> Unit,
     onClose: () -> Unit,
 ) {
     Column(
@@ -332,6 +348,14 @@ fun SelectionBar(
             BarAction(PIcons.Share, "Share", onShare)
             BarAction(PIcons.SelectAll, "Page", onSelectPage)
         }
+        // Changing the page's own text
+        Row(
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TextChip("Replace text", onReplace, Modifier.weight(1f))
+            TextChip("Remove text", onRemove, Modifier.weight(1f))
+        }
     }
 }
 
@@ -357,6 +381,7 @@ fun MarkBar(
         MarkKind.INK -> "Drawing"
         MarkKind.TEXT -> "Text"
         MarkKind.NOTE -> "Note"
+        MarkKind.REPLACE -> if (mark.text.isEmpty()) "Removed text" else "Replaced text"
     }
     Column(
         Modifier
@@ -385,7 +410,9 @@ fun MarkBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            MarkColors.all.filter { mark.kind != MarkKind.HIGHLIGHT || MarkColors.canHighlight(it) }.forEach { c ->
+            MarkColors.all.filter {
+                mark.kind != MarkKind.REPLACE && (mark.kind != MarkKind.HIGHLIGHT || MarkColors.canHighlight(it))
+            }.forEach { c ->
                 val selected = c == mark.color
                 Box(
                     Modifier
@@ -403,6 +430,20 @@ fun MarkBar(
             else if (mark.text.isNotBlank()) BarAction(PIcons.Copy, "Copy", onCopy)
             BarAction(PIcons.Bin, "Delete", onDelete, danger = true)
         }
+    }
+}
+
+@Composable
+private fun TextChip(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, Numio.Line, RoundedCornerShape(16.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(vertical = 9.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
     }
 }
 

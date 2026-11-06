@@ -147,6 +147,16 @@ fun ReaderScreen(
     var noteColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
     // A text box or note being dragged or pinched, shown in place of the saved one
     var preview by remember { mutableStateOf<Mark?>(null) }
+    // Selected text waiting for its replacement words
+    var replacing by remember { mutableStateOf<Selection?>(null) }
+
+    /** Changes the page's own text under [sel] to [text] when saved (empty removes it). */
+    fun replaceMark(sel: Selection, text: String): Mark {
+        val first = sel.boxes.first()
+        // Text size from the line height (selection boxes are about 1.45 × the text size)
+        val size = first.height() * doc.pages[sel.page].aspect / 1.45f
+        return Mark(sel.page, MarkKind.REPLACE, sel.boxes, 0x000000, text, fontSize = size)
+    }
     var penColor by rememberSaveable { mutableIntStateOf(MarkColors.BLACK) }
     var penWidth by rememberSaveable { mutableFloatStateOf(Ink.widths[1]) }
     // The mark tapped for changing (page and id); looked up fresh so colour changes and Undo show at once
@@ -337,6 +347,14 @@ fun ReaderScreen(
                 onShare = {
                     selection?.let { shareText(context, it.string) }
                 },
+                onReplace = {
+                    selection?.let { replacing = it }
+                    selection = null
+                },
+                onRemove = {
+                    selection?.let { onMark(replaceMark(it, "")) }
+                    selection = null
+                },
                 onSelectPage = {
                     selection = selection?.let { it.copy(start = it.text.firstIndex, end = it.text.lastIndex) }
                 },
@@ -510,6 +528,43 @@ fun ReaderScreen(
             },
             onDelete = old?.let { o -> { onRemoveMark(o); draft = null } },
             onDismiss = { draft = null },
+        )
+    } }
+
+    replacing?.let { sel -> key(sel) {
+        var text by remember { mutableStateOf(sel.string) }
+        AlertDialog(
+            onDismissRequest = { replacing = null },
+            containerColor = Numio.Surface,
+            title = { Text("Replace text", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { v -> text = v.replace('\n', ' ') },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Numio.Amber,
+                            cursorColor = Numio.Amber,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "The old words are taken out of the page and these are written in their place, " +
+                            "in the closest standard font.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onMark(replaceMark(sel, text.trim()))
+                    replacing = null
+                }) { Text("Replace", color = Numio.Amber) }
+            },
+            dismissButton = {
+                TextButton(onClick = { replacing = null }) { Text("Cancel", color = Numio.TextDim) }
+            },
         )
     } }
 
