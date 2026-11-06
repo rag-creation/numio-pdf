@@ -65,15 +65,15 @@ import kotlin.math.sqrt
  */
 object TextReplacer {
 
-    /** Returns how many of [marks] found text to change on the page. */
-    fun apply(doc: PDDocument, page: PDPage, geo: PageGeometry, marks: List<Mark>): Int {
-        if (marks.isEmpty()) return 0
+    /** Changes the page and returns the ids of the [marks] whose text was found. */
+    fun apply(doc: PDDocument, page: PDPage, geo: PageGeometry, marks: List<Mark>): Set<Long> {
+        if (marks.isEmpty()) return emptySet()
         val finder = Finder(geo, marks)
         finder.processPage(page)
         val edited = finder.pieces.filter { (_, list) ->
-            list.any { p -> p.usable && p.glyphs.any { it.markId != null } }
+            list.any { p -> p.usable && p.glyphs.any { it.picked } }
         }
-        if (edited.isEmpty()) return 0
+        if (edited.isEmpty()) return emptySet()
 
         // Rewrite the page's drawing instructions without the chosen letters
         val parser = PDFStreamParser(page)
@@ -106,7 +106,7 @@ object TextReplacer {
                 if (m.text.isNotEmpty()) writeText(doc, cs, m, first)
             }
         }
-        return finder.firsts.size
+        return finder.firsts.keys
     }
 
     private fun writeText(doc: PDDocument, cs: PDPageContentStream, m: Mark, first: First) {
@@ -254,7 +254,7 @@ object TextReplacer {
         var gap = 0f
         p.glyphs.forEachIndexed { i, g ->
             val bytes = p.bytes.copyOfRange(i * p.bytesPerCode, (i + 1) * p.bytesPerCode)
-            if (g.markId != null) {
+            if (g.picked) {
                 if (buf.size() > 0) {
                     out.add(COSString(buf.toByteArray()))
                     buf.reset()
@@ -276,7 +276,7 @@ object TextReplacer {
     /** Where the first replaced letter of a mark was drawn, and how. */
     class First(val matrix: Matrix, val font: PDFont, val fontName: String, val color: Int?)
 
-    class Glyph(val markId: Long?, val gap: Float)
+    class Glyph(val picked: Boolean, val gap: Float)
 
     /** One string handed to a text-drawing instruction, and its letters. */
     class Piece(val bytes: ByteArray) {
@@ -342,20 +342,36 @@ object TextReplacer {
             // A gap in a TJ list moves the pen by -gap/1000 of the font size
             val gap = -(displacement.x * 1000f + (state.characterSpacing + space) * 1000f / size)
 
-            // Middle of the letter, in shown page fractions
+            // The letter's box (baseline to about cap height), in shown page fractions
             val advance = displacement.x * textRenderingMatrix.scalingFactorX
             val height = textRenderingMatrix.scalingFactorY
-            val (u, v) = geo.toShown(
-                textRenderingMatrix.translateX + advance / 2f,
-                textRenderingMatrix.translateY + height * 0.3f,
-            )
-            val mark = marks.firstOrNull { m ->
-                m.boxes.any { b -> u >= b.left - 0.002f && u <= b.right + 0.002f && v >= b.top && v <= b.bottom }
+            val x0 = textRenderingMatrix.translateX
+            val y0 = textRenderingMatrix.translateY
+            val (u1, v1) = geo.toShown(x0, y0)
+            val (u2, v2) = geo.toShown(x0 + advance, y0 + height * 0.7f)
+            val gl = minOf(u1, u2)
+            val gr = maxOf(u1, u2)
+            val gt = minOf(v1, v2)
+            val gb = maxOf(v1, v2)
+            val (cu, cv) = geo.toShown(x0 + advance / 2f, y0 + height * 0.3f)
+
+            // A letter belongs to a change if it mostly lies inside the selection
+            // (or its middle does). Every change covering it counts, so changing
+            // the same words twice still finds them.
+            fun inside(b: com.rr.numio.pdf.text.NBox): Boolean {
+                val w = (minOf(gr, b.right) - maxOf(gl, b.left)).coerceAtLeast(0f)
+                val h = (minOf(gb, b.bottom) - maxOf(gt, b.top)).coerceAtLeast(0f)
+                val area = (gr - gl) * (gb - gt)
+                val centre = cu >= b.left - 0.002f && cu <= b.right + 0.002f && cv >= b.top - 0.002f && cv <= b.bottom + 0.002f
+                return centre || (area > 0f && w * h >= area * 0.5f)
             }
-            current?.glyphs?.add(Glyph(mark?.id, gap))
-            if (mark != null && mark.id !in firsts) {
-                val color = runCatching { graphicsState.nonStrokingColor.toRGB() }.getOrNull()
-                firsts[mark.id] = First(textRenderingMatrix.clone(), font, font.name ?: "", color?.and(0xFFFFFF))
+            val hits = marks.filter { m -> m.boxes.any(::inside) }
+            current?.glyphs?.add(Glyph(hits.isNotEmpty(), gap))
+            hits.forEach { m ->
+                if (m.id !in firsts) {
+                    val color = runCatching { graphicsState.nonStrokingColor.toRGB() }.getOrNull()
+                    firsts[m.id] = First(textRenderingMatrix.clone(), font, font.name ?: "", color?.and(0xFFFFFF))
+                }
             }
         }
     }

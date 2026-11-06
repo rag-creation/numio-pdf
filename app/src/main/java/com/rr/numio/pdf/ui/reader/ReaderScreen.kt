@@ -170,6 +170,10 @@ fun ReaderScreen(
      */
     fun addReplace(sel: Selection, text: String) {
         val base = replaceMark(sel, text)
+        // Changing the same words again replaces the earlier change instead of stacking
+        Edits.apply(emptyList(), edits, sel.page)
+            .filter { m -> m.kind == MarkKind.REPLACE && m.boxes.any { a -> base.boxes.any { b -> overlaps(a, b) } } }
+            .forEach(onRemoveMark)
         scope.launch {
             val page = doc.render(sel.page, 800)
             val mark = if (page == null) base else {
@@ -1112,6 +1116,9 @@ data class Pen(val color: Int, val width: Float)
 
 /** The stroke being drawn: page and points so far. */
 class LiveStroke(val page: Int, val points: FloatArray, val pen: Pen)
+
+private fun overlaps(a: NBox, b: NBox): Boolean =
+    a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 
 /** A text box or note about to be written ([existing] null) or changed. */
 data class Draft(val kind: MarkKind, val page: Int, val x: Float, val y: Float, val existing: Mark?)

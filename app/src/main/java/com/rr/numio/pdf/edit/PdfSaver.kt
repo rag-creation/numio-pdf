@@ -39,8 +39,14 @@ class SaveFailure(message: String) : Exception(message)
  */
 object PdfSaver {
 
-    suspend fun save(context: Context, source: Uri, target: Uri, plan: SavePlan) = withContext(Dispatchers.IO) {
+    /**
+     * Saves, and returns the text changes that couldn't be made (their text
+     * wasn't found in the page, e.g. it's part of an image). Everything else
+     * is saved.
+     */
+    suspend fun save(context: Context, source: Uri, target: Uri, plan: SavePlan): List<Mark> = withContext(Dispatchers.IO) {
         val ctx = context.applicationContext
+        val missed = ArrayList<Mark>()
         PDFBoxResourceLoader.init(ctx)
         val temp = File(ctx.cacheDir, "saving.pdf")
         try {
@@ -70,11 +76,7 @@ object PdfSaver {
                             } catch (e: Exception) {
                                 throw SaveFailure("This page's text couldn't be changed, so nothing was saved.")
                             }
-                            if (found < replace.size) {
-                                throw SaveFailure(
-                                    "Some of the text to change couldn't be found in the page (it may be part of an image), so nothing was saved.",
-                                )
-                            }
+                            missed += replace.filter { m -> m.id !in found }
                         }
                         val annotations: MutableList<PDAnnotation> = page.annotations
 
@@ -131,6 +133,7 @@ object PdfSaver {
         } finally {
             temp.delete()
         }
+        missed
     }
 
     /** Only marks PDF Reader shows and edits are ever changed or removed. */
