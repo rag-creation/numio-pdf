@@ -22,7 +22,7 @@ import com.tom_roush.pdfbox.contentstream.operator.text.MoveTextSetLeading
 import com.tom_roush.pdfbox.contentstream.operator.text.NextLine
 import com.tom_roush.pdfbox.contentstream.operator.text.SetCharSpacing
 import com.tom_roush.pdfbox.contentstream.operator.text.SetFontAndSize
-import com.tom_roush.pdfbox.contentstream.operator.text.SetMatrix
+import com.tom_roush.pdfbox.contentstream.operator.state.SetMatrix
 import com.tom_roush.pdfbox.contentstream.operator.text.SetTextHorizontalScaling
 import com.tom_roush.pdfbox.contentstream.operator.text.SetTextLeading
 import com.tom_roush.pdfbox.contentstream.operator.text.SetTextRenderingMode
