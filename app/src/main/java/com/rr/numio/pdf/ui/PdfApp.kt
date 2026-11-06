@@ -66,32 +66,34 @@ fun PdfApp(
         when (val r = vm.reader) {
             is ReaderState.Open -> {
                 fun leave() {
-                    if (vm.pending.isNotEmpty()) askLeave = true else back()
+                    if (vm.edits.isNotEmpty()) askLeave = true else back()
                 }
                 BackHandler { leave() }
                 val starred = files.firstOrNull { it.uri == r.uri }?.starred == true
                 ReaderScreen(
                     state = r,
                     starred = starred,
-                    pending = vm.pending,
+                    edits = vm.edits,
                     onBack = ::leave,
                     onStar = { vm.toggleStar(r.uri) },
                     onShare = { onShare(r.uri, r.name) },
                     onPageChanged = { vm.pageChanged(r.uri, it) },
                     onMark = vm::addMark,
+                    onRemoveMark = vm::removeMark,
+                    onRecolorMark = vm::recolorMark,
                     onUndo = vm::undoMark,
                     onSave = { page -> save(page, r.name) },
                 )
                 if (askLeave) {
-                    val n = vm.pending.size
+                    val n = vm.edits.size
                     AlertDialog(
                         onDismissRequest = { askLeave = false },
                         containerColor = Numio.Surface,
-                        title = { Text("Save your marks?", style = MaterialTheme.typography.titleLarge) },
+                        title = { Text("Save your changes?", style = MaterialTheme.typography.titleLarge) },
                         text = {
                             Text(
-                                if (n == 1) "1 highlight or underline isn't saved in the PDF yet."
-                                else "$n highlights or underlines aren't saved in the PDF yet.",
+                                if (n == 1) "1 change to your marks isn't saved in the PDF yet."
+                                else "$n changes to your marks aren't saved in the PDF yet.",
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = Numio.TextDim,
                             )

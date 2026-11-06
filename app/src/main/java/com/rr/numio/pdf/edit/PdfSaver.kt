@@ -26,7 +26,7 @@ class SaveFailure(message: String) : Exception(message)
  */
 object PdfSaver {
 
-    suspend fun save(context: Context, source: Uri, target: Uri, marks: List<Mark>) = withContext(Dispatchers.IO) {
+    suspend fun save(context: Context, source: Uri, target: Uri, plan: SavePlan) = withContext(Dispatchers.IO) {
         val ctx = context.applicationContext
         PDFBoxResourceLoader.init(ctx)
         val temp = File(ctx.cacheDir, "saving.pdf")
@@ -44,12 +44,26 @@ object PdfSaver {
                     throw SaveFailure("This PDF couldn't be changed. It may be locked or damaged.")
                 }
                 doc.use {
-                    marks.groupBy { m -> m.page }.forEach { (index, list) ->
-                        if (index !in 0 until it.numberOfPages) return@forEach
+                    val pages = (plan.added + plan.removed + plan.recolored).map { m -> m.page }.toSortedSet()
+                    for (index in pages) {
+                        if (index !in 0 until it.numberOfPages) continue
                         val page = it.getPage(index)
                         val geo = TextExtractor.geometry(page)
                         val annotations: MutableList<PDAnnotation> = page.annotations
-                        list.forEach { m -> annotations.add(annotation(m, geo)) }
+
+                        // New colours for marks already in the file
+                        plan.recolored.filter { m -> m.page == index }.forEach { m ->
+                            val a = annotations.getOrNull(m.ref) as? PDAnnotationTextMarkup ?: return@forEach
+                            a.color = PDColor(rgb(m.color), PDDeviceRGB.INSTANCE)
+                            a.appearance = null
+                            a.setModifiedDate(Calendar.getInstance())
+                            runCatching { a.constructAppearances() }
+                        }
+                        // Deleted marks, from the back so earlier positions stay right
+                        plan.removed.filter { m -> m.page == index }.map { m -> m.ref }.sortedDescending().forEach { ref ->
+                            if (annotations.getOrNull(ref) is PDAnnotationTextMarkup) annotations.removeAt(ref)
+                        }
+                        plan.added.filter { m -> m.page == index }.forEach { m -> annotations.add(annotation(m, geo)) }
                         page.annotations = annotations
                     }
                     it.save(temp)
@@ -79,6 +93,12 @@ object PdfSaver {
         }
     }
 
+    private fun rgb(color: Int) = floatArrayOf(
+        ((color shr 16) and 0xFF) / 255f,
+        ((color shr 8) and 0xFF) / 255f,
+        (color and 0xFF) / 255f,
+    )
+
     private fun annotation(m: Mark, geo: com.rr.numio.pdf.text.PageGeometry): PDAnnotationTextMarkup {
         val subtype = when (m.kind) {
             MarkKind.HIGHLIGHT -> PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT
@@ -98,15 +118,10 @@ object PdfSaver {
                 minY = minOf(minY, q[k * 2 + 1]); maxY = maxOf(maxY, q[k * 2 + 1])
             }
         }
-        val rgb = floatArrayOf(
-            ((m.color shr 16) and 0xFF) / 255f,
-            ((m.color shr 8) and 0xFF) / 255f,
-            (m.color and 0xFF) / 255f,
-        )
         return PDAnnotationTextMarkup(subtype).apply {
             rectangle = PDRectangle(minX, minY, maxX - minX, maxY - minY)
             quadPoints = quads
-            color = PDColor(rgb, PDDeviceRGB.INSTANCE)
+            color = PDColor(rgb(m.color), PDDeviceRGB.INSTANCE)
             if (m.text.isNotEmpty()) contents = m.text
             isPrinted = true
             setModifiedDate(Calendar.getInstance())
