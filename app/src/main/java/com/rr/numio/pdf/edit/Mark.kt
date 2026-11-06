@@ -41,8 +41,15 @@ object MarkColors {
     const val BLUE = 0x74C0FC
     const val PINK = 0xF783AC
     const val RED = 0xE03131
+    const val BLACK = 0x1A1A1A
 
-    val all = listOf(YELLOW, GREEN, BLUE, PINK, RED)
+    val all = listOf(YELLOW, GREEN, BLUE, PINK, RED, BLACK)
+
+    /**
+     * Colours a highlighter can use. Black would hide the words, which looks
+     * like blacking out private text but isn't (the words stay in the file).
+     */
+    fun canHighlight(color: Int) = color != BLACK
 
     fun name(color: Int) = when (color) {
         YELLOW -> "Yellow"
@@ -50,6 +57,7 @@ object MarkColors {
         BLUE -> "Blue"
         PINK -> "Pink"
         RED -> "Red"
+        BLACK -> "Black"
         else -> "Colour"
     }
 }
