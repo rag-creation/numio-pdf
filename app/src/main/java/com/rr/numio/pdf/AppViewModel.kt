@@ -86,8 +86,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private var savePage = 0
 
-    fun addMark(mark: Mark) {
-        edits.add(Edit.Add(mark.copy(id = nextNewId--, ref = -1)))
+    /** Adds a new mark and returns its id, so it can be picked straight away. */
+    fun addMark(mark: Mark): Long {
+        val id = nextNewId--
+        edits.add(Edit.Add(mark.copy(id = id, ref = -1)))
+        return id
     }
 
     fun removeMark(mark: Mark) {

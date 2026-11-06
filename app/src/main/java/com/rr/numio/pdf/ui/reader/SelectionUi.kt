@@ -342,7 +342,13 @@ fun MarkBar(
     onCopy: () -> Unit,
     onDelete: () -> Unit,
     onClose: () -> Unit,
+    onEdit: (() -> Unit)? = null,
 ) {
+    val hint = when (mark.kind) {
+        MarkKind.TEXT -> "Drag to move \u00b7 pinch to resize"
+        MarkKind.NOTE -> "Drag to move"
+        else -> null
+    }
     val label = when (mark.kind) {
         MarkKind.HIGHLIGHT -> "Highlight"
         MarkKind.UNDERLINE -> "Underline"
@@ -365,7 +371,10 @@ fun MarkBar(
             Modifier.fillMaxWidth().padding(start = 14.dp, end = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.titleSmall)
+                if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall)
+            }
             IconButton(onClick = onClose) {
                 Icon(PIcons.Close, contentDescription = "Done", tint = Numio.TextDim)
             }
@@ -389,7 +398,8 @@ fun MarkBar(
                 )
             }
             Spacer(Modifier.weight(1f))
-            if (mark.text.isNotBlank()) BarAction(PIcons.Copy, "Copy", onCopy)
+            if (onEdit != null) BarAction(PIcons.Pen, "Edit", onEdit)
+            else if (mark.text.isNotBlank()) BarAction(PIcons.Copy, "Copy", onCopy)
             BarAction(PIcons.Bin, "Delete", onDelete, danger = true)
         }
     }

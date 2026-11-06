@@ -123,7 +123,7 @@ fun ReaderScreen(
     onStar: () -> Unit,
     onShare: () -> Unit,
     onPageChanged: (Int) -> Unit,
-    onMark: (Mark) -> Unit,
+    onMark: (Mark) -> Long,
     onRemoveMark: (Mark) -> Unit,
     onRecolorMark: (Mark, Int) -> Unit,
     onChangeMark: (old: Mark, new: Mark) -> Unit,
@@ -145,6 +145,8 @@ fun ReaderScreen(
     var textColor by rememberSaveable { mutableIntStateOf(MarkColors.BLACK) }
     var textSize by rememberSaveable { mutableIntStateOf(1) }
     var noteColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
+    // A text box or note being dragged or pinched, shown in place of the saved one
+    var preview by remember { mutableStateOf<Mark?>(null) }
     var penColor by rememberSaveable { mutableIntStateOf(MarkColors.BLACK) }
     var penWidth by rememberSaveable { mutableFloatStateOf(Ink.widths[1]) }
     // The mark tapped for changing (page and id); looked up fresh so colour changes and Undo show at once
@@ -166,13 +168,7 @@ fun ReaderScreen(
                 val mark = hit?.let { h ->
                     Edits.apply(doc.text.cachedMarks(h.page), edits, h.page).lastOrNull { it.contains(h.x, h.y) }
                 }
-                when {
-                    mark == null -> chrome = !chrome
-                    // Text boxes and notes open straight into writing
-                    mark.kind == MarkKind.TEXT || mark.kind == MarkKind.NOTE ->
-                        draft = Draft(mark.kind, mark.page, mark.boxes.first().left, mark.boxes.first().top, mark)
-                    else -> editingRef = mark.page to mark.id
-                }
+                if (mark == null) chrome = !chrome else editingRef = mark.page to mark.id
             }
         }
     }
@@ -260,6 +256,10 @@ fun ReaderScreen(
             selection = selection,
             edits = edits,
             focused = editing?.id,
+            movable = editing?.takeIf { it.kind == MarkKind.TEXT || it.kind == MarkKind.NOTE },
+            preview = preview,
+            onPreview = { preview = it },
+            onMoved = { old, new -> onChangeMark(old, new) },
             pen = if (drawing) Pen(penColor, penWidth) else null,
             onStroke = { page, points ->
                 val stroke = Ink.simplify(points)
@@ -383,9 +383,25 @@ fun ReaderScreen(
             val shown = remember { arrayOfNulls<Mark>(1) }
             editing?.let { shown[0] = it }
             shown[0]?.let { m ->
+                val boxy = m.kind == MarkKind.TEXT || m.kind == MarkKind.NOTE
                 MarkBar(
                     mark = m,
-                    onColor = { c -> editing?.let { onRecolorMark(it, c) } },
+                    onColor = { c ->
+                        editing?.let {
+                            // Text boxes and notes are redrawn whole, so a colour change is a change
+                            if (boxy) onChangeMark(it, it.copy(color = c)) else onRecolorMark(it, c)
+                        }
+                    },
+                    onEdit = if (boxy) {
+                        {
+                            editing?.let { e ->
+                                draft = Draft(e.kind, e.page, e.boxes.first().left, e.boxes.first().top, e)
+                            }
+                            editingRef = null
+                        }
+                    } else {
+                        null
+                    },
                     onCopy = {
                         copyText(context, m.text)
                         editingRef = null
@@ -472,14 +488,23 @@ fun ReaderScreen(
             onDone = { text, color, size ->
                 val mark = if (d.kind == MarkKind.NOTE) {
                     noteColor = color
-                    Mark(d.page, MarkKind.NOTE, listOf(TextBox.noteBox(d.x, d.y, aspect)), color, text)
+                    Mark(d.page, MarkKind.NOTE, listOf(TextBox.noteBox(d.x, d.y, aspect, centred = old == null)), color, text)
                 } else {
                     textColor = color
                     textSize = size
                     val fs = Mark.fontSizes[size]
-                    Mark(d.page, MarkKind.TEXT, listOf(TextBox.box(text, fs, d.x, d.y, aspect)), color, text, fontSize = fs)
+                    Mark(
+                        d.page, MarkKind.TEXT, listOf(TextBox.box(text, fs, d.x, d.y, aspect, centred = old == null)),
+                        color, text, fontSize = fs,
+                    )
                 }
-                if (old == null) onMark(mark) else onChangeMark(old, mark)
+                if (old == null) {
+                    // Picked straight away, so it can be dragged into place or pinched
+                    editingRef = d.page to onMark(mark)
+                } else {
+                    onChangeMark(old, mark)
+                    editingRef = d.page to old.id
+                }
                 draft = null
             },
             onDelete = old?.let { o -> { onRemoveMark(o); draft = null } },
@@ -511,6 +536,10 @@ private fun Pages(
     selection: Selection?,
     edits: List<Edit>,
     focused: Long?,
+    movable: Mark?,
+    preview: Mark?,
+    onPreview: (Mark?) -> Unit,
+    onMoved: (old: Mark, new: Mark) -> Unit,
     pen: Pen?,
     onStroke: (page: Int, points: FloatArray) -> Unit,
     onTap: (PageHit?) -> Unit,
@@ -529,6 +558,9 @@ private fun Pages(
     val dragHandle by rememberUpdatedState(onDragHandle)
     val currentSelection by rememberUpdatedState(selection)
     val currentPen by rememberUpdatedState(pen)
+    val currentMovable by rememberUpdatedState(movable)
+    val showPreview by rememberUpdatedState(onPreview)
+    val moved by rememberUpdatedState(onMoved)
     val stroke by rememberUpdatedState(onStroke)
     // The stroke under the finger right now
     var live by remember { mutableStateOf<LiveStroke?>(null) }
@@ -605,6 +637,34 @@ private fun Pages(
                         val w = size.width.toFloat()
                         val h = size.height.toFloat()
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+
+                        // A picked text box or note: one finger drags it, two fingers resize the text
+                        val mv = currentMovable
+                        val onIt = mv?.let { m -> locate(down.position, w, m.page)?.takeIf { m.contains(it.x, it.y, 0.02f) } }
+                        if (mv != null && onIt != null) {
+                            down.consume()
+                            val info = listState.layoutInfo
+                            val itemH = info.visibleItemsInfo.firstOrNull { it.index == mv.page }?.size?.toFloat() ?: h
+                            val aspect = doc.pages[mv.page].aspect
+                            var now = mv
+                            var dx = 0f
+                            var dy = 0f
+                            var zoom = 1f
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.none { it.pressed }) break
+                                val pan = event.calculatePan()
+                                dx += pan.x / scale / baseWidthPx
+                                dy += pan.y / scale / itemH
+                                if (event.changes.count { it.pressed } >= 2) zoom *= event.calculateZoom()
+                                now = TextBox.moved(mv, dx, dy, zoom, aspect)
+                                showPreview(now)
+                                event.changes.forEach { it.consume() }
+                            }
+                            showPreview(null)
+                            if (dx != 0f || dy != 0f || zoom != 1f) moved(mv, now)
+                            return@awaitEachGesture
+                        }
 
                         // Pen: one finger draws; a second finger cancels the stroke and scrolls / zooms
                         val penNow = currentPen
@@ -796,6 +856,7 @@ private fun Pages(
                         selected = selection?.takeIf { it.page == index }?.boxes,
                         edits = edits,
                         focused = focused,
+                        preview = preview?.takeIf { it.page == index },
                         live = live?.takeIf { it.page == index },
                         scale = { scale },
                     )
@@ -815,6 +876,7 @@ private fun PageView(
     selected: List<NBox>?,
     edits: List<Edit>,
     focused: Long?,
+    preview: Mark?,
     live: LiveStroke?,
     scale: () -> Float,
 ) {
@@ -846,7 +908,8 @@ private fun PageView(
         } else {
             Text("${index + 1}", style = MaterialTheme.typography.bodySmall, color = Numio.Line)
         }
-        val marks = Edits.apply(saved, edits, index)
+        val applied = Edits.apply(saved, edits, index)
+        val marks = if (preview == null) applied else applied.map { if (it.id == preview.id) preview else it }
         if (marks.isNotEmpty()) MarksOverlay(marks, focused, scale)
         if (live != null) LiveInk(live.points, live.pen.width, live.pen.color)
         if (!selected.isNullOrEmpty()) SelectionOverlay(selected, scale)
