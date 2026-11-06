@@ -30,6 +30,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // "Save a copy": Android's own save screen, the person picks where the new PDF goes
+    private val saveCopy = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        if (uri != null) {
+            keepAccess(uri)
+            vm.save(uri)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -44,6 +52,7 @@ class MainActivity : ComponentActivity() {
                     vm = vm,
                     onOpenPicker = ::pick,
                     onShare = ::share,
+                    onSaveCopy = ::askWhereToSave,
                     onLeave = ::finish,
                 )
             }
@@ -75,16 +84,33 @@ class MainActivity : ComponentActivity() {
         vm.open(uri, fromOutside = true)
     }
 
+    private fun askWhereToSave(name: String) {
+        val base = name.removeSuffix(".pdf").removeSuffix(".PDF")
+        try {
+            saveCopy.launch("$base (marked).pdf")
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, "This phone has no screen for saving files.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     /**
      * Asks Android to let the app reopen this file later from the library.
      * Some apps only lend a file for one visit; then this quietly does nothing.
      */
     private fun keepAccess(uri: Uri) {
         if (uri.scheme != ContentResolver.SCHEME_CONTENT) return
+        // Read and write if offered (so marks can be saved into the file itself),
+        // otherwise read only
         try {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
         } catch (e: SecurityException) {
-            // Not offered by the app that owns the file
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e2: SecurityException) {
+                // Not offered by the app that owns the file
+            }
         }
     }
 

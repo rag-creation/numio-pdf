@@ -14,7 +14,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -31,31 +37,85 @@ fun PdfApp(
     vm: AppViewModel,
     onOpenPicker: () -> Unit,
     onShare: (uri: String, name: String) -> Unit,
+    onSaveCopy: (name: String) -> Unit,
     onLeave: () -> Unit,
 ) {
     val files by vm.store.files.collectAsStateWithLifecycle()
+    var askLeave by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     fun back() {
         if (vm.openedFromOutside) onLeave() else vm.closeReader()
     }
 
+    /** Into the file itself when Android allows it, otherwise as a new PDF the person places. */
+    fun save(page: Int, name: String) {
+        vm.rememberSavePage(page)
+        if (vm.canWriteOriginal()) vm.save(null) else onSaveCopy(name)
+    }
+
+    val notice = vm.notice
+    LaunchedEffect(notice) {
+        if (notice != null) {
+            Toast.makeText(context, notice, Toast.LENGTH_LONG).show()
+            vm.notice = null
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(Numio.Bg)) {
         when (val r = vm.reader) {
             is ReaderState.Open -> {
-                BackHandler { back() }
+                fun leave() {
+                    if (vm.pending.isNotEmpty()) askLeave = true else back()
+                }
+                BackHandler { leave() }
                 val starred = files.firstOrNull { it.uri == r.uri }?.starred == true
                 ReaderScreen(
                     state = r,
                     starred = starred,
-                    onBack = ::back,
+                    pending = vm.pending,
+                    onBack = ::leave,
                     onStar = { vm.toggleStar(r.uri) },
                     onShare = { onShare(r.uri, r.name) },
                     onPageChanged = { vm.pageChanged(r.uri, it) },
+                    onMark = vm::addMark,
+                    onUndo = vm::undoMark,
+                    onSave = { page -> save(page, r.name) },
                 )
+                if (askLeave) {
+                    val n = vm.pending.size
+                    AlertDialog(
+                        onDismissRequest = { askLeave = false },
+                        containerColor = Numio.Surface,
+                        title = { Text("Save your marks?", style = MaterialTheme.typography.titleLarge) },
+                        text = {
+                            Text(
+                                if (n == 1) "1 highlight or underline isn't saved in the PDF yet."
+                                else "$n highlights or underlines aren't saved in the PDF yet.",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Numio.TextDim,
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                askLeave = false
+                                save(files.firstOrNull { it.uri == r.uri }?.lastPage ?: 0, r.name)
+                            }) { Text("Save", color = Numio.Amber) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = {
+                                askLeave = false
+                                vm.discardMarks()
+                                back()
+                            }) { Text("Don't save", color = Numio.TextDim) }
+                        },
+                    )
+                }
             }
             is ReaderState.Loading -> {
-                BackHandler { back() }
-                Loading(r.name)
+                // While saving, back waits so the file isn't left half written
+                BackHandler { if (!r.saving) back() }
+                Loading(if (r.saving) "Saving\u2026" else r.name)
             }
             else -> LibraryScreen(
                 files = files,

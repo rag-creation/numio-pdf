@@ -2,8 +2,13 @@ package com.rr.numio.pdf.text
 
 import android.content.Context
 import android.net.Uri
+import com.rr.numio.pdf.edit.Mark
+import com.rr.numio.pdf.edit.MarkKind
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationTextMarkup
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
 import kotlinx.coroutines.Dispatchers
@@ -12,9 +17,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * Finds where the text sits on each page, using PdfBox (Apache-2.0), fully
- * on the phone. The file is only read for text the first time someone
- * long-presses, so plain reading stays as light as before.
+ * Reads what Android's page renderer can't: where the text sits on each page
+ * (for selecting) and the highlights / underlines saved in the file (Android
+ * doesn't draw those, so PDF Reader draws them itself). Uses PdfBox
+ * (Apache-2.0), fully on the phone, with spare data in a temporary file
+ * rather than memory so big PDFs don't run the phone out of memory.
  */
 class TextExtractor(private val context: Context, private val source: Uri) {
     private val lock = Mutex()
@@ -22,16 +29,23 @@ class TextExtractor(private val context: Context, private val source: Uri) {
     private var failed = false
     private var closed = false
     private val pages = HashMap<Int, PageText>()
+    private val marks = HashMap<Int, List<Mark>>()
 
     /** The page's text, or an empty page if it has none (a scan) or can't be read. */
     suspend fun page(index: Int): PageText = lock.withLock {
         pages[index] ?: withContext(Dispatchers.IO) { extract(index) }.also { pages[index] = it }
     }
 
+    /** Highlights, underlines and strike-outs saved in the file on this page. */
+    suspend fun marks(index: Int): List<Mark> = lock.withLock {
+        marks[index] ?: withContext(Dispatchers.IO) { readMarks(index) }.also { marks[index] = it }
+    }
+
     suspend fun close() {
         lock.withLock {
             closed = true
             pages.clear()
+            marks.clear()
             withContext(Dispatchers.IO) { runCatching { doc?.close() } }
             doc = null
         }
@@ -42,7 +56,9 @@ class TextExtractor(private val context: Context, private val source: Uri) {
         doc?.let { return it }
         return try {
             PDFBoxResourceLoader.init(context.applicationContext)
-            context.contentResolver.openInputStream(source)?.use { PDDocument.load(it) }
+            context.contentResolver.openInputStream(source)?.use {
+                PDDocument.load(it, MemoryUsageSetting.setupTempFileOnly())
+            }
                 .also { doc = it }
         } catch (e: Throwable) {
             // Out of memory on a huge file, or something PdfBox can't parse:
@@ -98,6 +114,40 @@ class TextExtractor(private val context: Context, private val source: Uri) {
             PageText(glyphs)
         } catch (e: Throwable) {
             PageText(emptyList())
+        }
+    }
+
+    private fun readMarks(index: Int): List<Mark> {
+        val d = load() ?: return emptyList()
+        return try {
+            val page = d.getPage(index)
+            val geo = geometry(page)
+            page.annotations.filterIsInstance<PDAnnotationTextMarkup>().mapNotNull { a ->
+                val kind = when (a.subtype) {
+                    PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT -> MarkKind.HIGHLIGHT
+                    PDAnnotationTextMarkup.SUB_TYPE_UNDERLINE, PDAnnotationTextMarkup.SUB_TYPE_SQUIGGLY -> MarkKind.UNDERLINE
+                    PDAnnotationTextMarkup.SUB_TYPE_STRIKEOUT -> MarkKind.STRIKEOUT
+                    else -> return@mapNotNull null
+                }
+                val q = a.quadPoints
+                val boxes = if (q != null && q.size >= 8) {
+                    (0 until q.size / 8).map { geo.boxAround(q, it * 8) }
+                } else {
+                    val r = a.rectangle ?: return@mapNotNull null
+                    listOf(geo.boxAround(floatArrayOf(r.lowerLeftX, r.upperRightY, r.upperRightX, r.upperRightY, r.lowerLeftX, r.lowerLeftY, r.upperRightX, r.lowerLeftY)))
+                }
+                val color = runCatching { a.color?.toRGB() }.getOrNull() ?: 0xFFD43B
+                Mark(index, kind, boxes, color and 0xFFFFFF, a.contents ?: "")
+            }
+        } catch (e: Throwable) {
+            emptyList()
+        }
+    }
+
+    companion object {
+        fun geometry(page: PDPage): PageGeometry {
+            val c = page.cropBox
+            return PageGeometry(c.lowerLeftX, c.lowerLeftY, c.upperRightX, c.upperRightY, page.rotation)
         }
     }
 }

@@ -14,6 +14,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
+import com.rr.numio.pdf.edit.Mark
+import com.rr.numio.pdf.edit.MarkColors
+import com.rr.numio.pdf.edit.MarkKind
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -65,15 +73,55 @@ fun BoxScope.SelectionOverlay(boxes: List<NBox>, scale: () -> Float) {
     }
 }
 
+/** Saved and unsaved marks on a page, drawn the way paper highlighters look. */
+@Composable
+fun BoxScope.MarksOverlay(marks: List<Mark>) {
+    Canvas(Modifier.matchParentSize()) {
+        marks.forEach { m ->
+            val c = Color(0xFF000000.toInt() or m.color)
+            m.boxes.forEach { b ->
+                val left = b.left * size.width
+                val right = b.right * size.width
+                val top = b.top * size.height
+                val bottom = b.bottom * size.height
+                val thick = maxOf(1.5.dp.toPx(), (bottom - top) * 0.08f)
+                when (m.kind) {
+                    // Multiply lets the black text show through, like ink from a real highlighter
+                    MarkKind.HIGHLIGHT -> drawRect(
+                        color = c,
+                        topLeft = Offset(left, top),
+                        size = Size(right - left, bottom - top),
+                        blendMode = BlendMode.Multiply,
+                    )
+                    MarkKind.UNDERLINE -> drawRect(
+                        color = c,
+                        topLeft = Offset(left, bottom - thick),
+                        size = Size(right - left, thick),
+                    )
+                    MarkKind.STRIKEOUT -> drawRect(
+                        color = c,
+                        topLeft = Offset(left, (top + bottom) / 2f - thick / 2f),
+                        size = Size(right - left, thick),
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** Shown while text is selected, in place of the page strip. */
 @Composable
 fun SelectionBar(
+    color: Int,
+    onColor: (Int) -> Unit,
+    onHighlight: () -> Unit,
+    onUnderline: () -> Unit,
     onCopy: () -> Unit,
     onShare: () -> Unit,
     onSelectPage: () -> Unit,
     onClose: () -> Unit,
 ) {
-    Row(
+    Column(
         Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
@@ -82,13 +130,40 @@ fun SelectionBar(
             .background(Numio.Surface)
             .border(1.dp, Numio.SurfaceHigh, RoundedCornerShape(26.dp))
             .padding(horizontal = 6.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        BarAction(PIcons.Copy, "Copy", onCopy, highlight = true)
-        BarAction(PIcons.Share, "Share", onShare)
-        BarAction(PIcons.SelectAll, "Whole page", onSelectPage)
-        BarAction(PIcons.Close, "Done", onClose)
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            MarkColors.all.forEach { c ->
+                val selected = c == color
+                Box(
+                    Modifier
+                        .size(28.dp)
+                        .then(if (selected) Modifier.border(2.dp, Numio.Text, CircleShape) else Modifier)
+                        .padding(if (selected) 4.dp else 2.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF000000.toInt() or c))
+                        .clickable(onClickLabel = MarkColors.name(c), role = Role.RadioButton) { onColor(c) },
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onClose) {
+                Icon(PIcons.Close, contentDescription = "Done", tint = Numio.TextDim)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BarAction(PIcons.Highlight, "Highlight", onHighlight, highlight = true)
+            BarAction(PIcons.Underline, "Underline", onUnderline)
+            BarAction(PIcons.Copy, "Copy", onCopy)
+            BarAction(PIcons.Share, "Share", onShare)
+            BarAction(PIcons.SelectAll, "Page", onSelectPage)
+        }
     }
 }
 
@@ -98,7 +173,7 @@ private fun BarAction(icon: ImageVector, label: String, onClick: () -> Unit, hig
         Modifier
             .clip(RoundedCornerShape(18.dp))
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
