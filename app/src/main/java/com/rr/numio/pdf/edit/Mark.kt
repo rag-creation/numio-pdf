@@ -15,6 +15,12 @@ enum class MarkKind {
      * when empty, which removes the text for good). Not an annotation.
      */
     REPLACE,
+    /**
+     * A signature in [Mark.boxes]: drawn ([Mark.ink], as fractions of the box,
+     * [Mark.width] a fraction of the box width) or typed ([Mark.text] in
+     * [Mark.fontName]).
+     */
+    SIGN,
 }
 
 /**

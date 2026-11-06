@@ -8,6 +8,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import com.rr.numio.pdf.text.NBox
 import com.rr.numio.pdf.edit.Edit
 import com.rr.numio.pdf.edit.ColorSample
+import com.rr.numio.pdf.edit.Signature
+import com.rr.numio.pdf.data.SignatureStore
 import com.rr.numio.pdf.form.FieldKind
 import com.rr.numio.pdf.form.FormField
 import com.rr.numio.pdf.edit.Edits
@@ -131,6 +133,9 @@ fun ReaderScreen(
     onRecolorMark: (Mark, Int) -> Unit,
     onChangeMark: (old: Mark, new: Mark) -> Unit,
     onFill: (field: String, value: String) -> Unit,
+    signatures: SignatureStore,
+    signaturesUnlocked: Boolean,
+    onSignaturesUnlocked: () -> Unit,
     onUndo: () -> Unit,
     onSave: (page: Int) -> Unit,
 ) {
@@ -151,6 +156,9 @@ fun ReaderScreen(
     var noteColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
     // A text box or note being dragged or pinched, shown in place of the saved one
     var preview by remember { mutableStateOf<Mark?>(null) }
+    // Signing: the sheet is open, then the chosen signature waits for a tap on the page
+    var signing by remember { mutableStateOf(false) }
+    var pendingSignature by remember { mutableStateOf<Signature?>(null) }
     // A text or choice form field being filled
     var fillingField by remember { mutableStateOf<FormField?>(null) }
 
@@ -218,6 +226,26 @@ fun ReaderScreen(
     fun tapped(hit: PageHit?) {
         val place = placing
         when {
+            place == MarkKind.SIGN -> {
+                val sig = pendingSignature
+                if (hit != null && sig != null) {
+                    // About a third of the page wide, centred on the finger
+                    val aspect = doc.pages[hit.page].aspect
+                    val w = 0.32f
+                    val h = (w / sig.aspect) / aspect
+                    val box = TextBox.moved(
+                        Mark(hit.page, MarkKind.SIGN, listOf(NBox(0f, 0f, w, h)), 0),
+                        hit.x - w / 2f, hit.y - h / 2f, 1f, aspect,
+                    ).boxes.first()
+                    val mark = Mark(
+                        hit.page, MarkKind.SIGN, listOf(box), sig.color, sig.text,
+                        ink = sig.strokes, width = sig.penWidth, fontName = sig.font,
+                    )
+                    editingRef = hit.page to onMark(mark)
+                    placing = null
+                    pendingSignature = null
+                }
+            }
             place != null -> if (hit != null) {
                 draft = Draft(place, hit.page, hit.x.coerceIn(0f, 1f), hit.y.coerceIn(0f, 1f), null)
                 placing = null
@@ -330,7 +358,7 @@ fun ReaderScreen(
             selection = selection,
             edits = edits,
             focused = editing?.id,
-            movable = editing?.takeIf { it.kind == MarkKind.TEXT || it.kind == MarkKind.NOTE },
+            movable = editing?.takeIf { it.kind == MarkKind.TEXT || it.kind == MarkKind.NOTE || it.kind == MarkKind.SIGN },
             preview = preview,
             onPreview = { preview = it },
             onMoved = { old, new -> onChangeMark(old, new) },
@@ -465,7 +493,7 @@ fun ReaderScreen(
             val shown = remember { arrayOfNulls<Mark>(1) }
             editing?.let { shown[0] = it }
             shown[0]?.let { m ->
-                val boxy = m.kind == MarkKind.TEXT || m.kind == MarkKind.NOTE
+                val boxy = m.kind == MarkKind.TEXT || m.kind == MarkKind.NOTE || m.kind == MarkKind.SIGN
                 MarkBar(
                     mark = m,
                     onColor = { c ->
@@ -474,7 +502,7 @@ fun ReaderScreen(
                             if (boxy) onChangeMark(it, it.copy(color = c)) else onRecolorMark(it, c)
                         }
                     },
-                    onEdit = if (boxy) {
+                    onEdit = if (boxy && m.kind != MarkKind.SIGN) {
                         {
                             editing?.let { e ->
                                 draft = Draft(e.kind, e.page, e.boxes.first().left, e.boxes.first().top, e)
@@ -523,6 +551,11 @@ fun ReaderScreen(
                     editingRef = null
                     placing = MarkKind.NOTE
                 },
+                onSign = {
+                    selection = null
+                    editingRef = null
+                    signing = true
+                },
             )
         }
     }
@@ -543,11 +576,18 @@ fun ReaderScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    if (placing == MarkKind.NOTE) "Tap where the note goes" else "Tap where the text goes",
+                    when (placing) {
+                        MarkKind.NOTE -> "Tap where the note goes"
+                        MarkKind.SIGN -> "Tap where the signature goes"
+                        else -> "Tap where the text goes"
+                    },
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { placing = null }) { Text("Cancel", color = Numio.TextDim) }
+                TextButton(onClick = {
+                    placing = null
+                    pendingSignature = null
+                }) { Text("Cancel", color = Numio.TextDim) }
             }
         }
     }
@@ -644,6 +684,20 @@ fun ReaderScreen(
             FieldTextDialog(f, now, onDone = done, onDismiss = { fillingField = null })
         }
     } }
+
+    if (signing) {
+        SignDialog(
+            store = signatures,
+            unlocked = signaturesUnlocked,
+            onUnlocked = onSignaturesUnlocked,
+            onUse = { sig ->
+                signing = false
+                pendingSignature = sig
+                placing = MarkKind.SIGN
+            },
+            onDismiss = { signing = false },
+        )
+    }
 
     if (askPage) {
         GoToPageDialog(
@@ -1117,6 +1171,7 @@ private fun BottomBar(
     onPen: () -> Unit,
     onText: () -> Unit,
     onNote: () -> Unit,
+    onSign: () -> Unit,
 ) {
     val strip = rememberLazyListState(initialFirstVisibleItemIndex = (current - 3).coerceAtLeast(0))
     LaunchedEffect(current) {
@@ -1153,6 +1208,7 @@ private fun BottomBar(
         ) {
             BarAction(PIcons.Pen, "Pen", onPen)
             BarAction(PIcons.TextBox, "Text", onText)
+            BarAction(PIcons.Sign, "Sign", onSign)
             BarAction(PIcons.Note, "Note", onNote)
             BarAction(PIcons.Share, "Share", onShare)
         }

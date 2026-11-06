@@ -187,6 +187,8 @@ class TextExtractor(private val context: Context, private val source: Uri) {
     }
 
     /** A pen drawing saved in the file (by this app or any other). */
+    private fun isSignature(a: PDAnnotation) = a.cosObject.getBoolean(COSName.getPDFName("NumioSign"), false)
+
     private fun readInk(a: PDAnnotation, page: Int, ref: Int, geo: PageGeometry): Mark? {
         val dict = a.cosObject
         val list = dict.getDictionaryObject(COSName.getPDFName("InkList")) as? COSArray ?: return null
@@ -209,6 +211,19 @@ class TextExtractor(private val context: Context, private val source: Uri) {
         val points = bs?.getFloat(COSName.W, 1f) ?: 1f
         val width = (points / geo.shownWidth).coerceIn(0.0005f, 0.05f)
         val color = runCatching { a.color?.toRGB() }.getOrNull() ?: 0x1A1A1A
+        if (isSignature(a)) {
+            // Back to a signature: strokes as fractions of its own box
+            val b = rectBox(a, geo) ?: return null
+            val bw = b.width().takeIf { it > 0f } ?: return null
+            val bh = b.height().takeIf { it > 0f } ?: return null
+            val inBox = strokes.map { s ->
+                FloatArray(s.size) { i -> if (i % 2 == 0) (s[i] - b.left) / bw else (s[i] - b.top) / bh }
+            }
+            return Mark(
+                page, MarkKind.SIGN, listOf(b), color and 0xFFFFFF, "",
+                Mark.savedId(page, ref), ref, inBox, width / bw,
+            )
+        }
         return Mark(
             page, MarkKind.INK, listOf(Ink.bounds(strokes, width)), color and 0xFFFFFF, "",
             Mark.savedId(page, ref), ref, strokes, width,
@@ -225,6 +240,12 @@ class TextExtractor(private val context: Context, private val source: Uri) {
     /** Typed text on the page. Its size and colour come from the /DA setting ("/Helv 12 Tf 0 0 0 rg"). */
     private fun readText(a: PDAnnotation, page: Int, ref: Int, geo: PageGeometry): Mark? {
         val box = rectBox(a, geo) ?: return null
+        if (isSignature(a)) {
+            return Mark(
+                page, MarkKind.SIGN, listOf(box), 0x111111, a.contents ?: "", Mark.savedId(page, ref), ref,
+                fontName = a.cosObject.getString(COSName.getPDFName("NumioFont")) ?: "cursive",
+            )
+        }
         val da = a.cosObject.getString(COSName.DA) ?: ""
         val points = Regex("""([0-9.]+)\s+Tf""").find(da)?.groupValues?.get(1)?.toFloatOrNull()?.takeIf { it > 0f } ?: 12f
         val rgb = Regex("""([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+rg""").find(da)?.groupValues

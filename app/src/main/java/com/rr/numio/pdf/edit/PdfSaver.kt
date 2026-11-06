@@ -105,6 +105,7 @@ object PdfSaver {
                                     MarkKind.INK -> ink(it, m, geo)
                                     MarkKind.TEXT -> freeText(it, m, geo)
                                     MarkKind.NOTE -> note(it, m, geo)
+                                    MarkKind.SIGN -> signature(it, m, geo)
                                     else -> annotation(m, geo)
                                 },
                             )
@@ -180,7 +181,7 @@ object PdfSaver {
             MarkKind.HIGHLIGHT -> PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT
             MarkKind.UNDERLINE -> PDAnnotationTextMarkup.SUB_TYPE_UNDERLINE
             MarkKind.STRIKEOUT -> PDAnnotationTextMarkup.SUB_TYPE_STRIKEOUT
-            MarkKind.INK, MarkKind.TEXT, MarkKind.NOTE, MarkKind.REPLACE -> error("saved by their own functions")
+            MarkKind.INK, MarkKind.TEXT, MarkKind.NOTE, MarkKind.REPLACE, MarkKind.SIGN -> error("saved by their own functions")
         }
         val quads = FloatArray(m.boxes.size * 8)
         var minX = Float.MAX_VALUE
@@ -343,6 +344,58 @@ object PdfSaver {
         val ops = "q ${n(rect.width)} 0 0 ${n(rect.height)} ${n(rect.lowerLeftX)} ${n(rect.lowerLeftY)} cm /${name.name} Do Q\n"
         stream.cosObject.createOutputStream().use { it.write(ops.toByteArray(Charsets.US_ASCII)) }
         a.appearance = PDAppearanceDictionary().apply { setNormalAppearance(stream) }
+        return a
+    }
+
+    /**
+     * A signature. Drawn ones become a standard Ink annotation (sharp at any
+     * zoom); typed ones a FreeText annotation whose look is the name drawn by
+     * Android in the signature style. Both are marked as PDF Reader signatures
+     * so they come back as signatures when the file is opened again.
+     */
+    private fun signature(doc: PDDocument, m: Mark, geo: PageGeometry): PDAnnotation {
+        val b = m.boxes.first()
+        val a = if (m.ink.isNotEmpty()) {
+            val strokes = m.ink.map { s ->
+                FloatArray(s.size) { i -> if (i % 2 == 0) b.left + s[i] * b.width() else b.top + s[i] * b.height() }
+            }
+            ink(doc, m.copy(kind = MarkKind.INK, ink = strokes, width = m.width * b.width()), geo)
+        } else {
+            val text = newAnnotation("FreeText")
+            val rect = pdfRect(m, geo)
+            text.rectangle = rect
+            text.contents = m.text
+            text.cosObject.setString(COSName.DA, "/Helv 12 Tf 0 0 0 rg")
+            text.cosObject.setItem(COSName.BS, COSDictionary().apply { setFloat(COSName.W, 0f) })
+            text.isPrinted = true
+            text.setModifiedDate(Calendar.getInstance())
+            val scale = 4f
+            val wPx = (rect.width * scale).toInt().coerceIn(1, 4096)
+            val hPx = (rect.height * scale).toInt().coerceIn(1, 4096)
+            var bitmap = Bitmap.createBitmap(wPx, hPx, Bitmap.Config.ARGB_8888)
+            TextBox.drawSignature(Canvas(bitmap), m.text, m.fontName, 0xFF000000.toInt() or m.color, 0f, 0f, wPx.toFloat(), hPx.toFloat())
+            if (geo.turnDegrees != 0) {
+                val turned = Bitmap.createBitmap(
+                    bitmap, 0, 0, bitmap.width, bitmap.height,
+                    Matrix().apply { postRotate(-geo.turnDegrees.toFloat()) }, true,
+                )
+                bitmap.recycle()
+                bitmap = turned
+            }
+            val image = LosslessFactory.createFromImage(doc, bitmap)
+            bitmap.recycle()
+            val stream = PDAppearanceStream(doc)
+            stream.bBox = rect
+            val resources = PDResources()
+            val name = resources.add(image)
+            stream.resources = resources
+            val ops = "q ${n(rect.width)} 0 0 ${n(rect.height)} ${n(rect.lowerLeftX)} ${n(rect.lowerLeftY)} cm /${name.name} Do Q\n"
+            stream.cosObject.createOutputStream().use { it.write(ops.toByteArray(Charsets.US_ASCII)) }
+            text.appearance = PDAppearanceDictionary().apply { setNormalAppearance(stream) }
+            text.cosObject.setString(COSName.getPDFName("NumioFont"), m.fontName)
+            text
+        }
+        a.cosObject.setBoolean(COSName.getPDFName("NumioSign"), true)
         return a
     }
 

@@ -38,6 +38,10 @@ sealed interface ReaderState {
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     val store = RecentStore(app)
 
+    /** Saved signatures, and whether they've been unlocked since the app opened. */
+    val signatures = com.rr.numio.pdf.data.SignatureStore(app)
+    var signaturesUnlocked by mutableStateOf(false)
+
     var reader by mutableStateOf<ReaderState>(ReaderState.Closed)
         private set
 

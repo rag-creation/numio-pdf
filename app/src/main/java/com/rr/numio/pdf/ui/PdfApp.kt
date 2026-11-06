@@ -83,6 +83,9 @@ fun PdfApp(
                     onRecolorMark = vm::recolorMark,
                     onChangeMark = vm::changeMark,
                     onFill = vm::fill,
+                    signatures = vm.signatures,
+                    signaturesUnlocked = vm.signaturesUnlocked,
+                    onSignaturesUnlocked = { vm.signaturesUnlocked = true },
                     onUndo = vm::undoMark,
                     onSave = { page -> save(page, r.name) },
                 )

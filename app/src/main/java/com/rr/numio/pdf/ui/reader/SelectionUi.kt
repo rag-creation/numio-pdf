@@ -30,6 +30,7 @@ import com.rr.numio.pdf.edit.Ink
 import com.rr.numio.pdf.edit.TextBox
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import com.rr.numio.pdf.edit.Mark
 import com.rr.numio.pdf.edit.MarkColors
 import com.rr.numio.pdf.edit.MarkKind
@@ -141,7 +142,7 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                             size = Size(right - left + grow * 0.6f, bottom - top + grow * 2f),
                         )
                     }
-                    MarkKind.INK, MarkKind.TEXT, MarkKind.NOTE -> Unit // drawn below
+                    MarkKind.INK, MarkKind.TEXT, MarkKind.NOTE, MarkKind.SIGN -> Unit // drawn below
                 }
             }
             when (m.kind) {
@@ -155,6 +156,7 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                     )
                 }
                 MarkKind.NOTE -> drawNote(m.boxes.first(), c)
+                MarkKind.SIGN -> drawSignature(m, c)
                 MarkKind.REPLACE -> if (m.text.isNotEmpty()) {
                     val b = m.boxes.first()
                     TextBox.drawOnLine(
@@ -165,6 +167,36 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                 else -> Unit
             }
         }
+    }
+}
+
+/** A signature mark: its strokes fitted to its box, or its typed name. */
+fun DrawScope.drawSignature(m: Mark, color: Color) {
+    val b = m.boxes.first()
+    val l = b.left * size.width
+    val t = b.top * size.height
+    val w = b.width() * size.width
+    val h = b.height() * size.height
+    if (m.ink.isNotEmpty()) {
+        val stroke = Stroke((m.width * w).coerceAtLeast(1f), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        m.ink.forEach { s ->
+            if (s.size < 2) return@forEach
+            if (s.size == 2) {
+                drawCircle(color, radius = stroke.width / 2f, center = Offset(l + s[0] * w, t + s[1] * h))
+                return@forEach
+            }
+            val path = Path().apply {
+                moveTo(l + s[0] * w, t + s[1] * h)
+                var i = 2
+                while (i + 1 < s.size) {
+                    lineTo(l + s[i] * w, t + s[i + 1] * h)
+                    i += 2
+                }
+            }
+            drawPath(path, color, style = stroke)
+        }
+    } else {
+        TextBox.drawSignature(drawContext.canvas.nativeCanvas, m.text, m.fontName, color.toArgb(), l, t, w, h)
     }
 }
 
@@ -375,6 +407,7 @@ fun MarkBar(
     val hint = when (mark.kind) {
         MarkKind.TEXT -> "Drag to move \u00b7 pinch to resize"
         MarkKind.NOTE -> "Drag to move"
+        MarkKind.SIGN -> "Drag to move \u00b7 pinch to resize"
         else -> null
     }
     val label = when (mark.kind) {
@@ -384,6 +417,7 @@ fun MarkBar(
         MarkKind.INK -> "Drawing"
         MarkKind.TEXT -> "Text"
         MarkKind.NOTE -> "Note"
+        MarkKind.SIGN -> "Signature"
         MarkKind.REPLACE -> if (mark.text.isEmpty()) "Removed text" else "Replaced text"
     }
     Column(

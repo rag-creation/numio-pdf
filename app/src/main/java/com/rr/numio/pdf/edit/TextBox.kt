@@ -45,6 +45,24 @@ object TextBox {
         return NBox(left, top, left + w, top + h)
     }
 
+    /** A typed signature's look: "cursive" (handwriting style), "serif" or "sans". */
+    fun signatureTypeface(style: String): Typeface = when (style) {
+        "cursive" -> Typeface.create("cursive", Typeface.NORMAL)
+        "serif" -> Typeface.create(Typeface.SERIF, Typeface.ITALIC)
+        else -> Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+    }
+
+    /** A typed signature filling a [width] × [height] box at ([left], [top]), centred. */
+    fun drawSignature(canvas: Canvas, text: String, style: String, color: Int, left: Float, top: Float, width: Float, height: Float) {
+        val p = paint(height * 0.7f, color).apply { typeface = signatureTypeface(style) }
+        val measured = p.measureText(text)
+        if (measured > width * 0.96f && measured > 0f) p.textSize *= width * 0.96f / measured
+        val fm = p.fontMetrics
+        val x = left + (width - p.measureText(text)) / 2f
+        val y = top + height / 2f - (fm.ascent + fm.descent) / 2f
+        canvas.drawText(text, x, y, p)
+    }
+
     /** The phone font closest to a PDF font, for previews. */
     fun typefaceFor(pdfFont: String): Typeface {
         val n = pdfFont.lowercase()
@@ -88,6 +106,14 @@ object TextBox {
                 mark.copy(fontSize = font, boxes = listOf(box(mark.text, font, cx, cy, aspect, centred = true)))
             }
             MarkKind.NOTE -> mark.copy(boxes = listOf(noteBox(b.left + dx, b.top + dy, aspect)))
+            MarkKind.SIGN -> {
+                // Grows and shrinks around its middle, keeping its shape
+                val w = (b.width() * zoom).coerceIn(0.04f, 0.95f)
+                val h = b.height() * (w / b.width())
+                val cx = ((b.left + b.right) / 2f + dx).coerceIn(w / 2f, 1f - w / 2f)
+                val cy = ((b.top + b.bottom) / 2f + dy).coerceIn(h / 2f, 1f - h / 2f)
+                mark.copy(boxes = listOf(NBox(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)))
+            }
             else -> mark
         }
     }
