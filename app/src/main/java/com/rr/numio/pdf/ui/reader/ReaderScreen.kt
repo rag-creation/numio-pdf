@@ -6,6 +6,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.rr.numio.pdf.text.NBox
+import com.rr.numio.pdf.edit.Edit
+import com.rr.numio.pdf.edit.Edits
 import com.rr.numio.pdf.edit.Mark
 import com.rr.numio.pdf.edit.MarkColors
 import com.rr.numio.pdf.edit.MarkKind
@@ -113,12 +115,14 @@ private val PAGE_SIDE = 8.dp
 fun ReaderScreen(
     state: ReaderState.Open,
     starred: Boolean,
-    pending: List<Mark>,
+    edits: List<Edit>,
     onBack: () -> Unit,
     onStar: () -> Unit,
     onShare: () -> Unit,
     onPageChanged: (Int) -> Unit,
     onMark: (Mark) -> Unit,
+    onRemoveMark: (Mark) -> Unit,
+    onRecolorMark: (Mark, Int) -> Unit,
     onUndo: () -> Unit,
     onSave: (page: Int) -> Unit,
 ) {
@@ -130,12 +134,31 @@ fun ReaderScreen(
     var askPage by remember { mutableStateOf(false) }
     var selection by remember { mutableStateOf<Selection?>(null) }
     var markColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
+    // The mark tapped for changing (page and id); looked up fresh so colour changes and Undo show at once
+    var editingRef by remember { mutableStateOf<Pair<Int, Long>?>(null) }
+    val editing: Mark? = editingRef?.let { (page, id) ->
+        Edits.apply(doc.text.cachedMarks(page), edits, page).firstOrNull { it.id == id }
+    }
+
+    fun tapped(hit: PageHit?) {
+        when {
+            selection != null -> selection = null
+            editingRef != null -> editingRef = null
+            else -> {
+                val mark = hit?.let { h ->
+                    Edits.apply(doc.text.cachedMarks(h.page), edits, h.page).lastOrNull { it.contains(h.x, h.y) }
+                }
+                if (mark != null) editingRef = mark.page to mark.id else chrome = !chrome
+            }
+        }
+    }
     var findingText by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
 
     // Long-press: find the text on that page (read once, then kept) and select the word
     fun longPress(hit: PageHit) {
+        editingRef = null
         scope.launch {
             val slow = launch {
                 delay(250)
@@ -211,8 +234,9 @@ fun ReaderScreen(
             doc = doc,
             listState = listState,
             selection = selection,
-            pending = pending,
-            onTap = { if (selection != null) selection = null else chrome = !chrome },
+            edits = edits,
+            focused = editing?.id,
+            onTap = ::tapped,
             onLongPress = ::longPress,
             onDragHandle = ::dragHandle,
         )
@@ -228,7 +252,7 @@ fun ReaderScreen(
                 current = current,
                 count = count,
                 starred = starred,
-                unsaved = pending.size,
+                unsaved = edits.size,
                 onBack = onBack,
                 onStar = onStar,
                 onUndo = onUndo,
@@ -301,7 +325,33 @@ fun ReaderScreen(
         }
 
         AnimatedVisibility(
-            visible = chrome && selection == null,
+            visible = editing != null && selection == null,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            // Keeps showing the last mark while sliding away
+            val shown = remember { arrayOfNulls<Mark>(1) }
+            editing?.let { shown[0] = it }
+            shown[0]?.let { m ->
+                MarkBar(
+                    mark = m,
+                    onColor = { c -> editing?.let { onRecolorMark(it, c) } },
+                    onCopy = {
+                        copyText(context, m.text)
+                        editingRef = null
+                    },
+                    onDelete = {
+                        editing?.let(onRemoveMark)
+                        editingRef = null
+                    },
+                    onClose = { editingRef = null },
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = chrome && selection == null && editing == null,
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -337,8 +387,9 @@ private fun Pages(
     doc: PdfDoc,
     listState: LazyListState,
     selection: Selection?,
-    pending: List<Mark>,
-    onTap: () -> Unit,
+    edits: List<Edit>,
+    focused: Long?,
+    onTap: (PageHit?) -> Unit,
     onLongPress: (PageHit) -> Unit,
     onDragHandle: (start: Boolean, hit: PageHit) -> Unit,
 ) {
@@ -534,9 +585,10 @@ private fun Pages(
                                     else zoomTo(DOUBLE_TAP_ZOOM, down.position, w, h)
                                 } else {
                                     taps.lastAt = upAt
+                                    val at = locate(down.position, w)
                                     taps.job = scope.launch {
                                         delay(260)
-                                        tap()
+                                        tap(at)
                                     }
                                 }
                             }
@@ -575,7 +627,8 @@ private fun Pages(
                     PageView(
                         doc, index, pageWidth, baseWidthPx, renderWidth,
                         selected = selection?.takeIf { it.page == index }?.boxes,
-                        pending = pending.filter { it.page == index },
+                        edits = edits,
+                        focused = focused,
                         scale = { scale },
                     )
                 }
@@ -592,7 +645,8 @@ private fun PageView(
     baseWidthPx: Int,
     renderWidthPx: Int,
     selected: List<NBox>?,
-    pending: List<Mark>,
+    edits: List<Edit>,
+    focused: Long?,
     scale: () -> Float,
 ) {
     // Marks already saved in the file: Android's renderer doesn't draw them, so we do
@@ -623,7 +677,8 @@ private fun PageView(
         } else {
             Text("${index + 1}", style = MaterialTheme.typography.bodySmall, color = Numio.Line)
         }
-        if (saved.isNotEmpty() || pending.isNotEmpty()) MarksOverlay(saved + pending)
+        val marks = Edits.apply(saved, edits, index)
+        if (marks.isNotEmpty()) MarksOverlay(marks, focused, scale)
         if (!selected.isNullOrEmpty()) SelectionOverlay(selected, scale)
     }
 }

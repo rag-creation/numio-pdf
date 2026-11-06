@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.IconButton
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import com.rr.numio.pdf.edit.Mark
 import com.rr.numio.pdf.edit.MarkColors
 import com.rr.numio.pdf.edit.MarkKind
@@ -76,9 +78,25 @@ fun BoxScope.SelectionOverlay(boxes: List<NBox>, scale: () -> Float) {
 
 /** Saved and unsaved marks on a page, drawn the way paper highlighters look. */
 @Composable
-fun BoxScope.MarksOverlay(marks: List<Mark>) {
+fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float) {
     Canvas(Modifier.matchParentSize()) {
         marks.forEach { m ->
+            if (m.id == focused) {
+                // The mark being changed gets a dashed amber outline
+                val pad = 3.dp.toPx() / scale().coerceAtLeast(1f)
+                val outline = Stroke(
+                    width = 1.5.dp.toPx() / scale().coerceAtLeast(1f),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()) ),
+                )
+                m.boxes.forEach { b ->
+                    drawRect(
+                        color = Numio.Amber,
+                        topLeft = Offset(b.left * size.width - pad, b.top * size.height - pad),
+                        size = Size((b.right - b.left) * size.width + pad * 2, (b.bottom - b.top) * size.height + pad * 2),
+                        style = outline,
+                    )
+                }
+            }
             val c = Color(0xFF000000.toInt() or m.color)
             m.boxes.forEach { b ->
                 val left = b.left * size.width
@@ -168,8 +186,76 @@ fun SelectionBar(
     }
 }
 
+/** Shown after tapping a highlight / underline: change its colour, copy its text or delete it. */
 @Composable
-private fun BarAction(icon: ImageVector, label: String, onClick: () -> Unit, highlight: Boolean = false) {
+fun MarkBar(
+    mark: Mark,
+    onColor: (Int) -> Unit,
+    onCopy: () -> Unit,
+    onDelete: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val label = when (mark.kind) {
+        MarkKind.HIGHLIGHT -> "Highlight"
+        MarkKind.UNDERLINE -> "Underline"
+        MarkKind.STRIKEOUT -> "Strike-out"
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, bottom = 14.dp)
+            .clip(RoundedCornerShape(26.dp))
+            .background(Numio.Surface)
+            .border(1.dp, Numio.SurfaceHigh, RoundedCornerShape(26.dp))
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 14.dp, end = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            IconButton(onClick = onClose) {
+                Icon(PIcons.Close, contentDescription = "Done", tint = Numio.TextDim)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            MarkColors.all.forEach { c ->
+                val selected = c == mark.color
+                Box(
+                    Modifier
+                        .size(30.dp)
+                        .then(if (selected) Modifier.border(2.dp, Numio.Text, CircleShape) else Modifier)
+                        .padding(if (selected) 4.dp else 2.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF000000.toInt() or c))
+                        .clickable(onClickLabel = MarkColors.name(c), role = Role.RadioButton) { onColor(c) },
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            if (mark.text.isNotBlank()) BarAction(PIcons.Copy, "Copy", onCopy)
+            BarAction(PIcons.Bin, "Delete", onDelete, danger = true)
+        }
+    }
+}
+
+@Composable
+private fun BarAction(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    highlight: Boolean = false,
+    danger: Boolean = false,
+) {
+    val tint = when {
+        danger -> Numio.Error
+        highlight -> Numio.Amber
+        else -> Numio.Text
+    }
     Column(
         Modifier
             .clip(RoundedCornerShape(18.dp))
@@ -178,8 +264,8 @@ private fun BarAction(icon: ImageVector, label: String, onClick: () -> Unit, hig
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Icon(icon, contentDescription = null, tint = if (highlight) Numio.Amber else Numio.Text, modifier = Modifier.size(22.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium, color = if (highlight) Numio.Amber else Numio.Text)
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium, color = tint)
     }
 }
 

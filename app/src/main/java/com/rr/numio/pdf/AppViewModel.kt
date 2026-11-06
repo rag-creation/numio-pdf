@@ -14,6 +14,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.rr.numio.pdf.data.RecentStore
+import com.rr.numio.pdf.edit.Edit
+import com.rr.numio.pdf.edit.Edits
 import com.rr.numio.pdf.edit.Mark
 import com.rr.numio.pdf.edit.PdfSaver
 import com.rr.numio.pdf.edit.SaveFailure
@@ -52,7 +54,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         openedFromOutside = fromOutside
         openJob?.cancel()
         closeDoc()
-        pending.clear()
+        edits.clear()
         reader = ReaderState.Loading(store.get(key)?.name ?: "")
         openJob = viewModelScope.launch { load(uri, page = null) }
     }
@@ -72,10 +74,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---- Marks (highlight / underline) not yet saved into the file
+    // ---- Changes to marks not yet saved into the file
 
-    /** Marks made since the PDF was opened or last saved. */
-    val pending = mutableStateListOf<Mark>()
+    /** Every change since the PDF was opened or last saved, oldest first. Undo drops the last. */
+    val edits = mutableStateListOf<Edit>()
+
+    private var nextNewId = -1L
 
     /** A short notice to show once ("Saved", or why saving failed). */
     var notice by mutableStateOf<String?>(null)
@@ -83,14 +87,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var savePage = 0
 
     fun addMark(mark: Mark) {
-        pending.add(mark)
+        edits.add(Edit.Add(mark.copy(id = nextNewId--, ref = -1)))
+    }
+
+    fun removeMark(mark: Mark) {
+        edits.add(Edit.Remove(mark))
+    }
+
+    fun recolorMark(mark: Mark, color: Int) {
+        if (mark.color != color) edits.add(Edit.Recolor(mark, color))
     }
 
     fun undoMark() {
-        if (pending.isNotEmpty()) pending.removeAt(pending.lastIndex)
+        if (edits.isNotEmpty()) edits.removeAt(edits.lastIndex)
     }
 
-    fun discardMarks() = pending.clear()
+    fun discardMarks() = edits.clear()
 
     /** The page to come back to after saving. */
     fun rememberSavePage(page: Int) {
@@ -110,8 +122,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Saves the marks into the open file ([target] null) or into a new copy at [target]. */
     fun save(target: Uri?) {
         val open = reader as? ReaderState.Open ?: return
-        if (pending.isEmpty()) return
-        val marks = pending.toList()
+        if (edits.isEmpty()) return
+        val plan = Edits.plan(edits.toList())
+        if (plan.isEmpty) {
+            // Changes that cancel out (a mark added then deleted): nothing to write
+            edits.clear()
+            return
+        }
         val original = Uri.parse(open.uri)
         val dest = target ?: original
         val page = savePage
@@ -121,8 +138,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val ctx = getApplication<Application>()
             open.doc.close()
             try {
-                PdfSaver.save(ctx, open.doc.source, dest, marks)
-                pending.clear()
+                PdfSaver.save(ctx, open.doc.source, dest, plan)
+                edits.clear()
                 Thumbnails.forget(ctx, dest.toString())
                 load(dest, page)
                 notice = if (target == null) "Saved" else "Saved as a new PDF"
@@ -136,7 +153,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun closeReader() {
         openJob?.cancel()
         closeDoc()
-        pending.clear()
+        edits.clear()
         reader = ReaderState.Closed
         openedFromOutside = false
     }

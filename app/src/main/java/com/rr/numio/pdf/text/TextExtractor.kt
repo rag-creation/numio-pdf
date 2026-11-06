@@ -29,12 +29,16 @@ class TextExtractor(private val context: Context, private val source: Uri) {
     private var failed = false
     private var closed = false
     private val pages = HashMap<Int, PageText>()
-    private val marks = HashMap<Int, List<Mark>>()
+    // Read from the screen thread for taps, so safe to share
+    private val marks = java.util.concurrent.ConcurrentHashMap<Int, List<Mark>>()
 
     /** The page's text, or an empty page if it has none (a scan) or can't be read. */
     suspend fun page(index: Int): PageText = lock.withLock {
         pages[index] ?: withContext(Dispatchers.IO) { extract(index) }.also { pages[index] = it }
     }
+
+    /** Saved marks of a page if already read, without waiting. */
+    fun cachedMarks(index: Int): List<Mark> = marks[index] ?: emptyList()
 
     /** Highlights, underlines and strike-outs saved in the file on this page. */
     suspend fun marks(index: Int): List<Mark> = lock.withLock {
@@ -122,7 +126,8 @@ class TextExtractor(private val context: Context, private val source: Uri) {
         return try {
             val page = d.getPage(index)
             val geo = geometry(page)
-            page.annotations.filterIsInstance<PDAnnotationTextMarkup>().mapNotNull { a ->
+            page.annotations.withIndex().mapNotNull { (ref, any) ->
+                val a = any as? PDAnnotationTextMarkup ?: return@mapNotNull null
                 val kind = when (a.subtype) {
                     PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT -> MarkKind.HIGHLIGHT
                     PDAnnotationTextMarkup.SUB_TYPE_UNDERLINE, PDAnnotationTextMarkup.SUB_TYPE_SQUIGGLY -> MarkKind.UNDERLINE
@@ -137,7 +142,7 @@ class TextExtractor(private val context: Context, private val source: Uri) {
                     listOf(geo.boxAround(floatArrayOf(r.lowerLeftX, r.upperRightY, r.upperRightX, r.upperRightY, r.lowerLeftX, r.lowerLeftY, r.upperRightX, r.lowerLeftY)))
                 }
                 val color = runCatching { a.color?.toRGB() }.getOrNull() ?: 0xFFD43B
-                Mark(index, kind, boxes, color and 0xFFFFFF, a.contents ?: "")
+                Mark(index, kind, boxes, color and 0xFFFFFF, a.contents ?: "", Mark.savedId(index, ref), ref)
             }
         } catch (e: Throwable) {
             emptyList()

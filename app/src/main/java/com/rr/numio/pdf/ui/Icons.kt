@@ -60,5 +60,6 @@ object PIcons {
     )
     val Underline = stroke("Underline", "M7 4v7a5 5 0 0 0 10 0V4", "M5 20h14")
     val Undo = stroke("Undo", "M9 14L4 9l5-5", "M4 9h11a5 5 0 0 1 0 10h-3")
+    val Bin = stroke("Bin", "M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13")
     val Lock = stroke("Lock", "M6.5 10.5h11a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1 -1.5 1.5h-11a1.5 1.5 0 0 1 -1.5 -1.5v-7a1.5 1.5 0 0 1 1.5 -1.5z", "M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5")
 }
