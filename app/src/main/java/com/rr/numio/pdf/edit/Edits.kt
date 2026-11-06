@@ -5,6 +5,8 @@ sealed interface Edit {
     data class Add(val mark: Mark) : Edit
     data class Remove(val mark: Mark) : Edit
     data class Recolor(val mark: Mark, val color: Int) : Edit
+    /** Anything else changed, like a text box's words, size or place. Same [Mark.id]. */
+    data class Change(val mark: Mark, val new: Mark) : Edit
 }
 
 /** What saving has to do to the file, worked out from the list of edits. */
@@ -37,6 +39,10 @@ object Edits {
                     val i = marks.indexOfFirst { it.id == e.mark.id }
                     if (i >= 0) marks[i] = marks[i].copy(color = e.color)
                 }
+                is Edit.Change -> {
+                    val i = marks.indexOfFirst { it.id == e.mark.id }
+                    if (i >= 0) marks[i] = e.new.copy(id = e.mark.id, ref = marks[i].ref)
+                }
             }
         }
         return marks
@@ -62,6 +68,19 @@ object Edits {
                     when {
                         new != null -> added[id] = new.copy(color = e.color)
                         e.mark.saved && id !in removed -> recolored[id] = e.mark.copy(color = e.color)
+                    }
+                }
+                // A changed saved mark is saved as: remove the old one, add the new one
+                is Edit.Change -> {
+                    val id = e.mark.id
+                    val replacement = e.new.copy(id = id, ref = -1)
+                    when {
+                        id in added -> added[id] = replacement
+                        e.mark.saved -> {
+                            removed[id] = e.mark
+                            recolored.remove(id)
+                            added[id] = replacement
+                        }
                     }
                 }
             }

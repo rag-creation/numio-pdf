@@ -27,6 +27,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import com.rr.numio.pdf.edit.Ink
+import com.rr.numio.pdf.edit.TextBox
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.nativeCanvas
 import com.rr.numio.pdf.edit.Mark
 import com.rr.numio.pdf.edit.MarkColors
 import com.rr.numio.pdf.edit.MarkKind
@@ -128,11 +131,37 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                         topLeft = Offset(left, (top + bottom) / 2f - thick / 2f),
                         size = Size(right - left, thick),
                     )
-                    MarkKind.INK -> Unit // drawn below, from its strokes
+                    MarkKind.INK, MarkKind.TEXT, MarkKind.NOTE -> Unit // drawn below
                 }
             }
-            if (m.kind == MarkKind.INK) drawInk(m.ink, m.width, c)
+            when (m.kind) {
+                MarkKind.INK -> drawInk(m.ink, m.width, c)
+                MarkKind.TEXT -> {
+                    val b = m.boxes.first()
+                    TextBox.draw(
+                        drawContext.canvas.nativeCanvas, m.text, m.fontSize * size.width,
+                        0xFF000000.toInt() or m.color, b.left * size.width, b.top * size.height,
+                    )
+                }
+                MarkKind.NOTE -> drawNote(m.boxes.first(), c)
+                else -> Unit
+            }
         }
+    }
+}
+
+/** A sticky note icon: a little coloured sheet with three lines of "writing". */
+fun DrawScope.drawNote(b: NBox, color: Color) {
+    val l = b.left * size.width
+    val t = b.top * size.height
+    val w = b.width() * size.width
+    val h = b.height() * size.height
+    val ink = Color(0xFF2A2925)
+    drawRoundRect(color, topLeft = Offset(l, t), size = Size(w, h), cornerRadius = CornerRadius(w * 0.14f))
+    drawRoundRect(ink, topLeft = Offset(l, t), size = Size(w, h), cornerRadius = CornerRadius(w * 0.14f), style = Stroke(w * 0.05f))
+    for (k in 0 until 3) {
+        val y = t + h * (0.32f + k * 0.18f)
+        drawLine(ink, Offset(l + w * 0.24f, y), Offset(l + w * (if (k == 2) 0.55f else 0.76f), y), strokeWidth = w * 0.07f, cap = StrokeCap.Round)
     }
 }
 
@@ -319,6 +348,8 @@ fun MarkBar(
         MarkKind.UNDERLINE -> "Underline"
         MarkKind.STRIKEOUT -> "Strike-out"
         MarkKind.INK -> "Drawing"
+        MarkKind.TEXT -> "Text"
+        MarkKind.NOTE -> "Note"
     }
     Column(
         Modifier
@@ -365,7 +396,7 @@ fun MarkBar(
 }
 
 @Composable
-private fun BarAction(
+fun BarAction(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,

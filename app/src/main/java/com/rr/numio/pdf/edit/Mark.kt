@@ -3,7 +3,13 @@ package com.rr.numio.pdf.edit
 import com.rr.numio.pdf.text.NBox
 
 /** The kinds of text marks PDF Reader draws and saves. */
-enum class MarkKind { HIGHLIGHT, UNDERLINE, STRIKEOUT, INK }
+enum class MarkKind {
+    HIGHLIGHT, UNDERLINE, STRIKEOUT, INK,
+    /** Typed text placed on the page (a PDF "FreeText" annotation). */
+    TEXT,
+    /** A sticky note: a small icon that opens to show what was written. */
+    NOTE,
+}
 
 /**
  * A highlight / underline over text on one page. [boxes] are one per line,
@@ -24,6 +30,8 @@ data class Mark(
     val ink: List<FloatArray> = emptyList(),
     /** Pen width as a fraction of the page width. */
     val width: Float = 0f,
+    /** Text size for [MarkKind.TEXT], as a fraction of the page width. */
+    val fontSize: Float = 0f,
 ) {
     val saved: Boolean get() = ref >= 0
 
@@ -33,6 +41,12 @@ data class Mark(
     }
 
     companion object {
+        /** Text box sizes as fractions of the page width: small, medium, large. */
+        val fontSizes = listOf(0.018f, 0.026f, 0.038f)
+
+        /** A sticky note's icon, as a fraction of the page width. */
+        const val NOTE_SIZE = 0.05f
+
         /** A stable id for a mark already in the file. Never clashes with new marks (those are negative). */
         fun savedId(page: Int, ref: Int): Long = page.toLong() * 1_000_000L + ref + 1
     }

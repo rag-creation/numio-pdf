@@ -9,6 +9,7 @@ import com.rr.numio.pdf.text.NBox
 import com.rr.numio.pdf.edit.Edit
 import com.rr.numio.pdf.edit.Edits
 import com.rr.numio.pdf.edit.Ink
+import com.rr.numio.pdf.edit.TextBox
 import com.rr.numio.pdf.edit.Mark
 import com.rr.numio.pdf.edit.MarkColors
 import com.rr.numio.pdf.edit.MarkKind
@@ -69,6 +70,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -124,6 +126,7 @@ fun ReaderScreen(
     onMark: (Mark) -> Unit,
     onRemoveMark: (Mark) -> Unit,
     onRecolorMark: (Mark, Int) -> Unit,
+    onChangeMark: (old: Mark, new: Mark) -> Unit,
     onUndo: () -> Unit,
     onSave: (page: Int) -> Unit,
 ) {
@@ -136,6 +139,12 @@ fun ReaderScreen(
     var selection by remember { mutableStateOf<Selection?>(null) }
     var markColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
     var drawing by rememberSaveable { mutableStateOf(false) }
+    // Text box or note waiting for a tap on the page, then the one being written
+    var placing by remember { mutableStateOf<MarkKind?>(null) }
+    var draft by remember { mutableStateOf<Draft?>(null) }
+    var textColor by rememberSaveable { mutableIntStateOf(MarkColors.BLACK) }
+    var textSize by rememberSaveable { mutableIntStateOf(1) }
+    var noteColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
     var penColor by rememberSaveable { mutableIntStateOf(MarkColors.BLACK) }
     var penWidth by rememberSaveable { mutableFloatStateOf(Ink.widths[1]) }
     // The mark tapped for changing (page and id); looked up fresh so colour changes and Undo show at once
@@ -145,14 +154,25 @@ fun ReaderScreen(
     }
 
     fun tapped(hit: PageHit?) {
+        val place = placing
         when {
+            place != null -> if (hit != null) {
+                draft = Draft(place, hit.page, hit.x.coerceIn(0f, 1f), hit.y.coerceIn(0f, 1f), null)
+                placing = null
+            }
             selection != null -> selection = null
             editingRef != null -> editingRef = null
             else -> {
                 val mark = hit?.let { h ->
                     Edits.apply(doc.text.cachedMarks(h.page), edits, h.page).lastOrNull { it.contains(h.x, h.y) }
                 }
-                if (mark != null) editingRef = mark.page to mark.id else chrome = !chrome
+                when {
+                    mark == null -> chrome = !chrome
+                    // Text boxes and notes open straight into writing
+                    mark.kind == MarkKind.TEXT || mark.kind == MarkKind.NOTE ->
+                        draft = Draft(mark.kind, mark.page, mark.boxes.first().left, mark.boxes.first().top, mark)
+                    else -> editingRef = mark.page to mark.id
+                }
             }
         }
     }
@@ -380,7 +400,7 @@ fun ReaderScreen(
         }
 
         AnimatedVisibility(
-            visible = chrome && selection == null && editing == null && !drawing,
+            visible = chrome && selection == null && editing == null && !drawing && placing == null,
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -395,9 +415,77 @@ fun ReaderScreen(
                     editingRef = null
                     drawing = true
                 },
+                onText = {
+                    selection = null
+                    editingRef = null
+                    placing = MarkKind.TEXT
+                },
+                onNote = {
+                    selection = null
+                    editingRef = null
+                    placing = MarkKind.NOTE
+                },
             )
         }
     }
+
+    // "Tap where it goes" while placing a text box or note
+    if (placing != null) {
+        Box(Modifier.fillMaxSize()) {
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(start = 12.dp, end = 12.dp, bottom = 14.dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Numio.Surface)
+                    .border(1.dp, Numio.SurfaceHigh, RoundedCornerShape(26.dp))
+                    .padding(start = 20.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (placing == MarkKind.NOTE) "Tap where the note goes" else "Tap where the text goes",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { placing = null }) { Text("Cancel", color = Numio.TextDim) }
+            }
+        }
+    }
+
+    draft?.let { d -> key(d) {
+        val old = d.existing
+        val aspect = doc.pages[d.page].aspect
+        WriteDialog(
+            title = when {
+                d.kind == MarkKind.NOTE && old == null -> "New note"
+                d.kind == MarkKind.NOTE -> "Note"
+                old == null -> "Add text"
+                else -> "Edit text"
+            },
+            initialText = old?.text ?: "",
+            initialColor = old?.color ?: if (d.kind == MarkKind.NOTE) noteColor else textColor,
+            initialSize = if (d.kind == MarkKind.NOTE) null
+            else old?.let { o -> Mark.fontSizes.indices.minByOrNull { kotlin.math.abs(Mark.fontSizes[it] - o.fontSize) } } ?: textSize,
+            isNew = old == null,
+            onDone = { text, color, size ->
+                val mark = if (d.kind == MarkKind.NOTE) {
+                    noteColor = color
+                    Mark(d.page, MarkKind.NOTE, listOf(TextBox.noteBox(d.x, d.y, aspect)), color, text)
+                } else {
+                    textColor = color
+                    textSize = size
+                    val fs = Mark.fontSizes[size]
+                    Mark(d.page, MarkKind.TEXT, listOf(TextBox.box(text, fs, d.x, d.y, aspect)), color, text, fontSize = fs)
+                }
+                if (old == null) onMark(mark) else onChangeMark(old, mark)
+                draft = null
+            },
+            onDelete = old?.let { o -> { onRemoveMark(o); draft = null } },
+            onDismiss = { draft = null },
+        )
+    } }
 
     if (askPage) {
         GoToPageDialog(
@@ -819,7 +907,15 @@ private fun TopBar(
 }
 
 @Composable
-private fun BottomBar(doc: PdfDoc, current: Int, onJump: (Int) -> Unit, onShare: () -> Unit, onPen: () -> Unit) {
+private fun BottomBar(
+    doc: PdfDoc,
+    current: Int,
+    onJump: (Int) -> Unit,
+    onShare: () -> Unit,
+    onPen: () -> Unit,
+    onText: () -> Unit,
+    onNote: () -> Unit,
+) {
     val strip = rememberLazyListState(initialFirstVisibleItemIndex = (current - 3).coerceAtLeast(0))
     LaunchedEffect(current) {
         val visible = strip.layoutInfo.visibleItemsInfo
@@ -827,7 +923,7 @@ private fun BottomBar(doc: PdfDoc, current: Int, onJump: (Int) -> Unit, onShare:
             strip.animateScrollToItem((current - 3).coerceAtLeast(0))
         }
     }
-    Row(
+    Column(
         Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
@@ -835,25 +931,28 @@ private fun BottomBar(doc: PdfDoc, current: Int, onJump: (Int) -> Unit, onShare:
             .clip(RoundedCornerShape(26.dp))
             .background(Numio.Surface)
             .border(1.dp, Numio.SurfaceHigh, RoundedCornerShape(26.dp))
-            .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 6.dp, vertical = 8.dp),
     ) {
         LazyRow(
             state = strip,
-            modifier = Modifier.weight(1f).height(56.dp),
+            modifier = Modifier.fillMaxWidth().height(56.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            contentPadding = PaddingValues(horizontal = 4.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp),
         ) {
             items(doc.pageCount, key = { it }) { index ->
                 StripPage(doc, index, selected = index == current, onClick = { onJump(index) })
             }
         }
-        IconButton(onClick = onPen) {
-            Icon(PIcons.Pen, contentDescription = "Draw with the pen", tint = Numio.Text)
-        }
-        IconButton(onClick = onShare) {
-            Icon(PIcons.Share, contentDescription = "Share", tint = Numio.Text)
+        Row(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BarAction(PIcons.Pen, "Pen", onPen)
+            BarAction(PIcons.TextBox, "Text", onText)
+            BarAction(PIcons.Note, "Note", onNote)
+            BarAction(PIcons.Share, "Share", onShare)
         }
     }
 }
@@ -863,6 +962,9 @@ data class Pen(val color: Int, val width: Float)
 
 /** The stroke being drawn: page and points so far. */
 class LiveStroke(val page: Int, val points: FloatArray, val pen: Pen)
+
+/** A text box or note about to be written ([existing] null) or changed. */
+data class Draft(val kind: MarkKind, val page: Int, val x: Float, val y: Float, val existing: Mark?)
 
 /** Single tap waits briefly in case it becomes a double tap. */
 private class TapMemory {
