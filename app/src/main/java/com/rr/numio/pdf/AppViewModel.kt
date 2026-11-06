@@ -54,12 +54,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     )
         private set
 
-    fun setLook(value: PageLook) {
+    fun chooseLook(value: PageLook) {
         look = value
         readingPrefs.edit().putString("look", value.name).apply()
     }
 
-    fun setLayout(value: PageLayout) {
+    fun chooseLayout(value: PageLayout) {
         layout = value
         readingPrefs.edit().putString("layout", value.name).apply()
     }
