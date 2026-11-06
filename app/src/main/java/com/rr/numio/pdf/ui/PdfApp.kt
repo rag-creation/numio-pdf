@@ -30,6 +30,7 @@ import com.rr.numio.pdf.AppViewModel
 import com.rr.numio.pdf.ReaderState
 import com.rr.numio.pdf.ui.library.LibraryScreen
 import com.rr.numio.pdf.ui.reader.ReaderScreen
+import com.rr.numio.pdf.ui.settings.SettingsScreen
 import com.rr.numio.pdf.ui.theme.Numio
 
 @Composable
@@ -131,13 +132,33 @@ fun PdfApp(
                 BackHandler { if (!r.saving) back() }
                 Loading(if (r.saving) "Saving\u2026" else r.name)
             }
-            else -> LibraryScreen(
-                files = files,
-                onOpen = { vm.open(android.net.Uri.parse(it.uri), fromOutside = false) },
-                onOpenPicker = onOpenPicker,
-                onStar = { vm.toggleStar(it.uri) },
-                onRemove = { vm.remove(it.uri) },
-            )
+            else -> if (vm.settingsOpen) {
+                BackHandler { vm.settingsOpen = false }
+                var signatureCount by remember { mutableStateOf(vm.signatures.load().size) }
+                SettingsScreen(
+                    look = vm.look,
+                    layout = vm.layout,
+                    savedSignatures = signatureCount,
+                    recentFiles = files.size,
+                    onLook = vm::chooseLook,
+                    onLayout = vm::chooseLayout,
+                    onClearRecent = vm::clearRecent,
+                    onClearSignatures = {
+                        vm.signatures.clear()
+                        signatureCount = 0
+                    },
+                    onBack = { vm.settingsOpen = false },
+                )
+            } else {
+                LibraryScreen(
+                    files = files,
+                    onOpen = { vm.open(android.net.Uri.parse(it.uri), fromOutside = false) },
+                    onOpenPicker = onOpenPicker,
+                    onStar = { vm.toggleStar(it.uri) },
+                    onRemove = { vm.remove(it.uri) },
+                    onSettings = { vm.settingsOpen = true },
+                )
+            }
         }
 
         val failed = vm.reader as? ReaderState.Failed

@@ -16,6 +16,10 @@ class SignatureStore(context: Context) {
 
     fun remove(index: Int) = save(load().filterIndexed { i, _ -> i != index })
 
+    fun clear() {
+        file.delete()
+    }
+
     private fun save(list: List<Signature>) {
         runCatching { file.writeText(SignatureCodec.encode(list)) }
     }

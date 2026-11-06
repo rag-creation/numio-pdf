@@ -86,6 +86,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun renameBookmark(page: Int, name: String) = saveBookmarks(Bookmarks.rename(bookmarks, page, name))
 
+    /** Settings screen open (from the library's gear). */
+    var settingsOpen by mutableStateOf(false)
+
+    /** Forgets the library: list, stars, reading places and bookmarks. The PDFs aren't touched. */
+    fun clearRecent() {
+        store.files.value.forEach { Thumbnails.forget(getApplication(), it.uri) }
+        store.clear()
+        bookmarkPrefs.edit().clear().apply()
+    }
+
     /** Saved signatures, and whether they've been unlocked since the app opened. */
     val signatures = com.rr.numio.pdf.data.SignatureStore(app)
     var signaturesUnlocked by mutableStateOf(false)

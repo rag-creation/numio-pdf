@@ -59,6 +59,7 @@ fun LibraryScreen(
     onOpenPicker: () -> Unit,
     onStar: (RecentFile) -> Unit,
     onRemove: (RecentFile) -> Unit,
+    onSettings: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf(Filter.Recent) }
@@ -77,7 +78,7 @@ fun LibraryScreen(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 120.dp),
         ) {
-            item { Header() }
+            item { Header(onSettings) }
             item {
                 Column(Modifier.padding(horizontal = 20.dp)) {
                     Text("Your PDFs", style = MaterialTheme.typography.headlineMedium)
@@ -137,12 +138,12 @@ fun LibraryScreen(
 }
 
 @Composable
-private fun Header() {
+private fun Header(onSettings: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 14.dp),
+            .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -152,7 +153,10 @@ private fun Header() {
             contentDescription = "Numio",
             modifier = Modifier.height(24.dp),
         )
-        Text("PDF Reader", style = MaterialTheme.typography.bodyMedium, color = Numio.TextDim)
+        Text("PDF Reader", style = MaterialTheme.typography.bodyMedium, color = Numio.TextDim, modifier = Modifier.weight(1f))
+        IconButton(onClick = onSettings) {
+            Icon(PIcons.Settings, contentDescription = "Settings", tint = Numio.TextDim)
+        }
     }
 }
 
