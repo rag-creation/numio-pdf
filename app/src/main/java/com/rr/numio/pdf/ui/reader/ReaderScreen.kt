@@ -1,0 +1,510 @@
+package com.rr.numio.pdf.ui.reader
+
+import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.ScrollableDefaults
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.stopScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.rr.numio.pdf.ReaderState
+import com.rr.numio.pdf.pdf.PdfDoc
+import com.rr.numio.pdf.ui.PIcons
+import com.rr.numio.pdf.ui.theme.Numio
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+
+private const val MAX_ZOOM = 5f
+private const val DOUBLE_TAP_ZOOM = 2.5f
+private val PAGE_GAP = 10.dp
+private val PAGE_SIDE = 8.dp
+
+@Composable
+fun ReaderScreen(
+    state: ReaderState.Open,
+    starred: Boolean,
+    onBack: () -> Unit,
+    onStar: () -> Unit,
+    onShare: () -> Unit,
+    onPageChanged: (Int) -> Unit,
+) {
+    val doc = state.doc
+    val count = doc.pageCount
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = state.startPage.coerceIn(0, count - 1))
+    val scope = rememberCoroutineScope()
+    var chrome by remember { mutableStateOf(true) }
+    var askPage by remember { mutableStateOf(false) }
+
+    // The page under the middle of the screen counts as the one being read
+    val current by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val middle = (info.viewportStartOffset + info.viewportEndOffset) / 2
+            info.visibleItemsInfo.firstOrNull { it.offset <= middle && it.offset + it.size >= middle }?.index
+                ?: listState.firstVisibleItemIndex
+        }
+    }
+
+    // Remember the reading place, a moment after scrolling settles
+    val savePage by rememberUpdatedState(onPageChanged)
+    LaunchedEffect(listState) {
+        snapshotFlow { current }.collectLatest {
+            delay(300)
+            savePage(it)
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(Numio.Bg)) {
+        Pages(doc, listState, onTap = { chrome = !chrome })
+
+        AnimatedVisibility(
+            visible = chrome,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            TopBar(state.name, current, count, starred, onBack, onStar)
+        }
+
+        AnimatedVisibility(
+            visible = chrome || listState.isScrollInProgress,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(top = 80.dp, end = 14.dp),
+        ) {
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Numio.SurfaceHigh)
+                    .clickable(onClickLabel = "Go to page", role = Role.Button) { askPage = true }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+            ) {
+                Text("${current + 1} / $count", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+
+        AnimatedVisibility(
+            visible = chrome,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            BottomBar(
+                doc = doc,
+                current = current,
+                onJump = { scope.launch { listState.scrollToItem(it) } },
+                onShare = onShare,
+            )
+        }
+    }
+
+    if (askPage) {
+        GoToPageDialog(
+            count = count,
+            onDismiss = { askPage = false },
+            onGo = {
+                askPage = false
+                scope.launch { listState.scrollToItem(it) }
+            },
+        )
+    }
+}
+
+/**
+ * All pages in one scrolling column. Pinch or double-tap to zoom; once zoomed,
+ * one finger pans and the gesture code scrolls the list itself, so moving a
+ * finger moves the page by the same distance on screen at any zoom.
+ */
+@Composable
+private fun Pages(doc: PdfDoc, listState: LazyListState, onTap: () -> Unit) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offX by remember { mutableFloatStateOf(0f) }
+    var offY by remember { mutableFloatStateOf(0f) }
+    val zoomed by remember { derivedStateOf { scale > 1.001f } }
+    val sharp by remember { derivedStateOf { scale >= 1.6f } }
+    val scope = rememberCoroutineScope()
+    val fling = ScrollableDefaults.flingBehavior()
+    val tap by rememberUpdatedState(onTap)
+    val density = LocalDensity.current
+
+    BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
+        val pageWidth: Dp = maxWidth - PAGE_SIDE * 2
+        val baseWidthPx = with(density) { pageWidth.roundToPx() }.coerceAtLeast(1)
+        // Zoomed in far enough: draw pages at twice the size so text stays sharp
+        val renderWidth = if (sharp) baseWidthPx * 2 else baseWidthPx
+
+        val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 72.dp
+        val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp
+
+        fun clamp(w: Float, h: Float) {
+            offX = offX.coerceIn(w - scale * w, 0f)
+            offY = offY.coerceIn(h - scale * h, 0f)
+        }
+
+        fun zoomTo(target: Float, focus: Offset, w: Float, h: Float) {
+            val from = scale
+            val startX = offX
+            val startY = offY
+            val endScale = target.coerceIn(1f, MAX_ZOOM)
+            val endX = (focus.x - (focus.x - startX) * (endScale / from)).coerceIn(w - endScale * w, 0f)
+            val endY = (focus.y - (focus.y - startY) * (endScale / from)).coerceIn(h - endScale * h, 0f)
+            scope.launch {
+                animate(0f, 1f, animationSpec = tween(220)) { t, _ ->
+                    scale = from + (endScale - from) * t
+                    offX = startX + (endX - startX) * t
+                    offY = startY + (endY - startY) * t
+                }
+            }
+        }
+
+        val taps = remember { TapMemory() }
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    val slop = viewConfiguration.touchSlop
+                    awaitEachGesture {
+                        val w = size.width.toFloat()
+                        val h = size.height.toFloat()
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        if (zoomed) scope.launch { listState.stopScroll() }
+                        val tracker = VelocityTracker()
+                        tracker.addPosition(down.uptimeMillis, down.position)
+                        var multi = false
+                        var moved = false
+                        var travel = Offset.Zero
+                        var upAt = down.uptimeMillis
+
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val pressed = event.changes.filter { it.pressed }
+                            if (pressed.isEmpty()) {
+                                upAt = event.changes.firstOrNull()?.uptimeMillis ?: upAt
+                                break
+                            }
+                            if (pressed.size >= 2) multi = true
+                            val pan = event.calculatePan()
+                            travel += pan
+                            if (multi || travel.getDistance() > slop) moved = true
+
+                            if (multi || zoomed) {
+                                if (multi) {
+                                    val zoom = event.calculateZoom()
+                                    val centroid = event.calculateCentroid(useCurrent = true)
+                                    val newScale = (scale * zoom).coerceIn(1f, MAX_ZOOM)
+                                    val k = newScale / scale
+                                    offX = centroid.x - (centroid.x - offX) * k
+                                    offY = centroid.y - (centroid.y - offY) * k
+                                    scale = newScale
+                                }
+                                if (moved) {
+                                    offX += pan.x
+                                    // Move within the zoomed screen first, then scroll the pages
+                                    val before = offY
+                                    offY = (offY + pan.y).coerceIn(h - scale * h, 0f)
+                                    val rest = pan.y - (offY - before)
+                                    if (rest != 0f) listState.dispatchRawDelta(-rest / scale)
+                                }
+                                clamp(w, h)
+                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            }
+                            if (!multi) pressed.first().let { tracker.addPosition(it.uptimeMillis, it.position) }
+                        }
+
+                        when {
+                            !moved && !multi && upAt - down.uptimeMillis < 400 -> {
+                                if (down.uptimeMillis - taps.lastAt < 300) {
+                                    // Double tap: zoom in at the finger, or back out
+                                    taps.job?.cancel()
+                                    taps.lastAt = 0L
+                                    if (zoomed) zoomTo(1f, down.position, w, h)
+                                    else zoomTo(DOUBLE_TAP_ZOOM, down.position, w, h)
+                                } else {
+                                    taps.lastAt = upAt
+                                    taps.job = scope.launch {
+                                        delay(260)
+                                        tap()
+                                    }
+                                }
+                            }
+                            zoomed && !multi && moved -> {
+                                val vy = tracker.calculateVelocity().y
+                                scope.launch {
+                                    listState.scroll { with(fling) { performFling(-vy / scale) } }
+                                }
+                            }
+                        }
+                        if (scale < 1.02f) {
+                            scale = 1f
+                            offX = 0f
+                            offY = 0f
+                        }
+                    }
+                },
+        ) {
+            LazyColumn(
+                state = listState,
+                userScrollEnabled = !zoomed,
+                contentPadding = PaddingValues(top = top, bottom = bottom),
+                verticalArrangement = Arrangement.spacedBy(PAGE_GAP),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offX
+                        translationY = offY
+                    },
+            ) {
+                items(doc.pageCount, key = { it }) { index ->
+                    PageView(doc, index, pageWidth, baseWidthPx, renderWidth)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PageView(doc: PdfDoc, index: Int, width: Dp, baseWidthPx: Int, renderWidthPx: Int) {
+    val aspect = doc.pages[index].aspect
+    val bitmap by produceState(
+        initialValue = doc.cached(index, renderWidthPx) ?: doc.cached(index, baseWidthPx),
+        index, renderWidthPx,
+    ) {
+        doc.render(index, renderWidthPx)?.let { value = it }
+    }
+    Box(
+        Modifier
+            .width(width)
+            .aspectRatio(1f / aspect)
+            .background(Numio.Paper),
+        contentAlignment = Alignment.Center,
+    ) {
+        val b = bitmap
+        if (b != null) {
+            val image = remember(b) { b.asImageBitmap() }
+            Image(
+                bitmap = image,
+                contentDescription = "Page ${index + 1}",
+                contentScale = ContentScale.FillBounds,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Text("${index + 1}", style = MaterialTheme.typography.bodySmall, color = Numio.Line)
+        }
+    }
+}
+
+@Composable
+private fun TopBar(name: String, current: Int, count: Int, starred: Boolean, onBack: () -> Unit, onStar: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(Numio.Bg.copy(alpha = 0.94f))
+            .statusBarsPadding()
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(PIcons.Back, contentDescription = "Back", tint = Numio.Text)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Page ${current + 1} of $count", style = MaterialTheme.typography.bodySmall)
+        }
+        IconButton(onClick = onStar) {
+            Icon(
+                if (starred) PIcons.StarFilled else PIcons.Star,
+                contentDescription = if (starred) "Remove star" else "Star",
+                tint = if (starred) Numio.Amber else Numio.Text,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BottomBar(doc: PdfDoc, current: Int, onJump: (Int) -> Unit, onShare: () -> Unit) {
+    val strip = rememberLazyListState(initialFirstVisibleItemIndex = (current - 3).coerceAtLeast(0))
+    LaunchedEffect(current) {
+        val visible = strip.layoutInfo.visibleItemsInfo
+        if (visible.none { it.index == current } || visible.firstOrNull()?.index == current || visible.lastOrNull()?.index == current) {
+            strip.animateScrollToItem((current - 3).coerceAtLeast(0))
+        }
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, bottom = 14.dp)
+            .clip(RoundedCornerShape(26.dp))
+            .background(Numio.Surface)
+            .border(1.dp, Numio.SurfaceHigh, RoundedCornerShape(26.dp))
+            .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LazyRow(
+            state = strip,
+            modifier = Modifier.weight(1f).height(56.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            contentPadding = PaddingValues(horizontal = 4.dp),
+        ) {
+            items(doc.pageCount, key = { it }) { index ->
+                StripPage(doc, index, selected = index == current, onClick = { onJump(index) })
+            }
+        }
+        IconButton(onClick = onShare) {
+            Icon(PIcons.Share, contentDescription = "Share", tint = Numio.Text)
+        }
+    }
+}
+
+/** Single tap waits briefly in case it becomes a double tap. */
+private class TapMemory {
+    var job: Job? = null
+    var lastAt = 0L
+}
+
+private const val STRIP_PX = 96
+
+@Composable
+private fun StripPage(doc: PdfDoc, index: Int, selected: Boolean, onClick: () -> Unit) {
+    val aspect = doc.pages[index].aspect
+    val bitmap by produceState<Bitmap?>(doc.cached(index, STRIP_PX), index) {
+        doc.render(index, STRIP_PX)?.let { value = it }
+    }
+    val shape = RoundedCornerShape(3.dp)
+    val height = 48.dp
+    Box(
+        Modifier
+            .height(height)
+            .width(height / aspect)
+            .then(if (selected) Modifier.border(2.dp, Numio.Amber, shape) else Modifier)
+            .padding(if (selected) 3.dp else 0.dp)
+            .clip(shape)
+            .background(Numio.Paper)
+            .clickable(onClickLabel = "Go to page ${index + 1}", onClick = onClick),
+    ) {
+        bitmap?.let { b ->
+            val image = remember(b) { b.asImageBitmap() }
+            Image(image, contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
+        }
+    }
+}
+
+@Composable
+private fun GoToPageDialog(count: Int, onDismiss: () -> Unit, onGo: (Int) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val number = text.toIntOrNull()?.takeIf { it in 1..count }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Numio.Surface,
+        title = { Text("Go to page", style = MaterialTheme.typography.titleLarge) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { v -> text = v.filter { it.isDigit() }.take(6) },
+                singleLine = true,
+                label = { Text("Page 1 to $count") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Numio.Amber,
+                    focusedLabelColor = Numio.Amber,
+                    cursorColor = Numio.Amber,
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { number?.let { onGo(it - 1) } }, enabled = number != null) {
+                Text("Go", color = if (number != null) Numio.Amber else Numio.TextDim)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = Numio.TextDim) }
+        },
+    )
+}

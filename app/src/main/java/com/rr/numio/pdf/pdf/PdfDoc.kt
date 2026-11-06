@@ -1,0 +1,163 @@
+package com.rr.numio.pdf.pdf
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
+import android.os.ParcelFileDescriptor
+import android.util.LruCache
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
+/** Width and height of a page in PDF points. */
+data class PageSize(val width: Int, val height: Int) {
+    val aspect: Float get() = if (width <= 0) 1.414f else height.toFloat() / width
+}
+
+/** Why a file couldn't be opened, in words for the person, not an exception. */
+class OpenFailure(message: String) : Exception(message)
+
+/**
+ * One open PDF, drawn by Android's own renderer (android.graphics.pdf), so no
+ * PDF library is bundled. The renderer can only work on one page at a time,
+ * so every call goes through one lock.
+ */
+class PdfDoc private constructor(
+    private val fd: ParcelFileDescriptor,
+    private val renderer: PdfRenderer,
+    val pages: List<PageSize>,
+) {
+    val pageCount: Int get() = pages.size
+
+    private val lock = Mutex()
+    private var closed = false
+
+    // Rendered pages, newest kept, up to a quarter of the app's memory
+    private val cache = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 4).toInt()) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
+
+    fun cached(index: Int, widthPx: Int): Bitmap? = cache.get(key(index, widthPx))
+
+    /** The page drawn [widthPx] wide on white, or null once the document is closed. */
+    suspend fun render(index: Int, widthPx: Int): Bitmap? {
+        val key = key(index, widthPx)
+        cache.get(key)?.let { return it }
+        return lock.withLock {
+            cache.get(key) ?: withContext(Dispatchers.IO) {
+                if (closed || index !in pages.indices) return@withContext null
+                val page = renderer.openPage(index)
+                try {
+                    val w = widthPx.coerceIn(1, MAX_SIDE)
+                    val h = (w * page.height.toFloat() / page.width.coerceAtLeast(1)).toInt().coerceIn(1, MAX_SIDE)
+                    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    bitmap
+                } finally {
+                    page.close()
+                }
+            }?.also { cache.put(key, it) }
+        }
+    }
+
+    suspend fun close() {
+        lock.withLock {
+            if (!closed) {
+                closed = true
+                cache.evictAll()
+                withContext(Dispatchers.IO) {
+                    runCatching { renderer.close() }
+                    runCatching { fd.close() }
+                }
+            }
+        }
+    }
+
+    private fun key(index: Int, widthPx: Int) = "$index@$widthPx"
+
+    companion object {
+        /** Big enough for a sharp zoomed page, small enough not to run out of memory. */
+        const val MAX_SIDE = 4096
+
+        suspend fun open(context: Context, uri: Uri): PdfDoc = withContext(Dispatchers.IO) {
+            try {
+                openDirect(context, uri)
+            } catch (e: Unreadable) {
+                // Some apps (email, chat) hand over a stream Android's renderer can't
+                // jump around in. Copy it into the app's cache on this phone and try that.
+                val copy = copyToCache(context, uri) ?: throw OpenFailure(DAMAGED)
+                try {
+                    openDirect(context, Uri.fromFile(copy))
+                } catch (e2: Unreadable) {
+                    throw OpenFailure(DAMAGED)
+                }
+            }
+        }
+
+        private const val DAMAGED = "This doesn't look like a working PDF. The file may be damaged."
+
+        /** The renderer couldn't read the file as it was handed over. */
+        private class Unreadable : Exception()
+
+        private fun openDirect(context: Context, uri: Uri): PdfDoc {
+            val fd = try {
+                context.contentResolver.openFileDescriptor(uri, "r")
+            } catch (e: SecurityException) {
+                throw OpenFailure("PDF Reader no longer has permission to open this file. Open it again from where it is saved.")
+            } catch (e: java.io.FileNotFoundException) {
+                throw OpenFailure("This file isn't there any more. It may have been moved or deleted.")
+            } catch (e: Exception) {
+                throw OpenFailure("This file couldn't be opened.")
+            } ?: throw OpenFailure("This file couldn't be opened.")
+
+            val renderer = try {
+                PdfRenderer(fd)
+            } catch (e: SecurityException) {
+                runCatching { fd.close() }
+                throw OpenFailure("This PDF is locked with a password. Password-protected PDFs aren't supported yet.")
+            } catch (e: Exception) {
+                runCatching { fd.close() }
+                throw Unreadable()
+            }
+
+            val pages = try {
+                (0 until renderer.pageCount).map { i ->
+                    val page = renderer.openPage(i)
+                    try {
+                        PageSize(page.width, page.height)
+                    } finally {
+                        page.close()
+                    }
+                }
+            } catch (e: Exception) {
+                runCatching { renderer.close() }
+                runCatching { fd.close() }
+                throw OpenFailure(DAMAGED)
+            }
+
+            if (pages.isEmpty()) {
+                runCatching { renderer.close() }
+                runCatching { fd.close() }
+                throw OpenFailure("This PDF has no pages.")
+            }
+            return PdfDoc(fd, renderer, pages)
+        }
+
+        /** One working copy at a time; the last one is replaced. */
+        private fun copyToCache(context: Context, uri: Uri): java.io.File? {
+            return try {
+                val dir = java.io.File(context.cacheDir, "opened").apply { mkdirs() }
+                val file = java.io.File(dir, "current.pdf")
+                val input = context.contentResolver.openInputStream(uri) ?: return null
+                input.use { stream -> file.outputStream().use { stream.copyTo(it) } }
+                file
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+}
