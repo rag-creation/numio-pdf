@@ -1100,7 +1100,7 @@ private fun PageView(
         } else {
             Text("${index + 1}", style = MaterialTheme.typography.bodySmall, color = Numio.Line)
         }
-        if (fields.isNotEmpty()) FormOverlay(fields, fills)
+        if (fields.isNotEmpty()) FormOverlay(fields, fills, bitmap)
         val applied = Edits.apply(saved, edits, index)
         val marks = if (preview == null) applied else applied.map { if (it.id == preview.id) preview else it }
         if (marks.isNotEmpty()) MarksOverlay(marks, focused, scale)

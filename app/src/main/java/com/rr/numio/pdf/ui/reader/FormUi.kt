@@ -1,6 +1,8 @@
 package com.rr.numio.pdf.ui.reader
 
+import android.graphics.Bitmap
 import android.graphics.Paint
+import android.os.Build
 import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -56,7 +58,7 @@ private val Ink = Color(0xFF111111)
  * [fills] are values changed since the last save, by field name.
  */
 @Composable
-fun BoxScope.FormOverlay(fields: List<FormField>, fills: Map<String, String>) {
+fun BoxScope.FormOverlay(fields: List<FormField>, fills: Map<String, String>, page: Bitmap?) {
     Canvas(Modifier.matchParentSize()) {
         val canvas = drawContext.canvas.nativeCanvas
         fields.forEach { f ->
@@ -64,8 +66,18 @@ fun BoxScope.FormOverlay(fields: List<FormField>, fills: Map<String, String>) {
             val t = f.box.top * size.height
             val w = f.box.width() * size.width
             val h = f.box.height() * size.height
-            if (!f.readOnly) drawRect(FieldTint, Offset(l, t), Size(w, h))
-            val value = fills[f.name] ?: f.value
+            val pending = fills[f.name]
+            if (SYSTEM_DRAWS_FORMS) {
+                // Android 15+ draws saved values itself; only a changed one needs
+                // the old value hidden (in the box's own colour) and the new one drawn
+                if (!f.readOnly) drawRect(FieldTint, Offset(l, t), Size(w, h))
+                if (pending == null) return@forEach
+                val inset = if (f.kind == FieldKind.CHECK || f.kind == FieldKind.RADIO) minOf(w, h) * 0.14f else 1f
+                drawRect(fieldBackground(page, f), Offset(l + inset, t + inset), Size(w - inset * 2, h - inset * 2))
+            } else if (!f.readOnly) {
+                drawRect(FieldTint, Offset(l, t), Size(w, h))
+            }
+            val value = pending ?: f.value
             when (f.kind) {
                 FieldKind.CHECK -> if (f.isOn(value)) {
                     val s = minOf(w, h)
@@ -113,6 +125,25 @@ fun BoxScope.FormOverlay(fields: List<FormField>, fills: Map<String, String>) {
             }
         }
     }
+}
+
+/**
+ * From Android 15 the system's PDF renderer draws form fields itself (it
+ * didn't before), so PDF Reader only draws values that aren't saved yet.
+ */
+private val SYSTEM_DRAWS_FORMS = Build.VERSION.SDK_INT >= 35
+
+/** A field's own background colour, read from the drawn page just inside its top edge. */
+private fun fieldBackground(page: Bitmap?, f: FormField): Color {
+    if (page == null || page.isRecycled) return Color.White
+    val y = ((f.box.top + f.box.height() * 0.1f) * page.height).toInt().coerceIn(0, page.height - 1)
+    val samples = listOf(0.06f, 0.25f, 0.5f, 0.75f, 0.94f).map { k ->
+        val x = ((f.box.left + f.box.width() * k) * page.width).toInt().coerceIn(0, page.width - 1)
+        page.getPixel(x, y) or 0xFF000000.toInt()
+    }
+    // The most common of the samples (ignores one that happens to land on a letter)
+    val pick = samples.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: samples[2]
+    return Color(pick)
 }
 
 /** Typing into a text field. */
