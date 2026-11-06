@@ -6,6 +6,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.rr.numio.pdf.text.NBox
+import com.rr.numio.pdf.edit.Edit
+import com.rr.numio.pdf.edit.ColorSample
+import com.rr.numio.pdf.edit.Signature
+import com.rr.numio.pdf.data.SignatureStore
+import com.rr.numio.pdf.form.FieldKind
+import com.rr.numio.pdf.form.FormField
+import com.rr.numio.pdf.edit.Edits
+import com.rr.numio.pdf.edit.Ink
+import com.rr.numio.pdf.edit.TextBox
+import com.rr.numio.pdf.edit.Mark
+import com.rr.numio.pdf.edit.MarkColors
+import com.rr.numio.pdf.edit.MarkKind
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.rr.numio.pdf.text.Selection
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
@@ -61,6 +75,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -108,10 +123,21 @@ private val PAGE_SIDE = 8.dp
 fun ReaderScreen(
     state: ReaderState.Open,
     starred: Boolean,
+    edits: List<Edit>,
     onBack: () -> Unit,
     onStar: () -> Unit,
     onShare: () -> Unit,
     onPageChanged: (Int) -> Unit,
+    onMark: (Mark) -> Long,
+    onRemoveMark: (Mark) -> Unit,
+    onRecolorMark: (Mark, Int) -> Unit,
+    onChangeMark: (old: Mark, new: Mark) -> Unit,
+    onFill: (field: String, value: String) -> Unit,
+    signatures: SignatureStore,
+    signaturesUnlocked: Boolean,
+    onSignaturesUnlocked: () -> Unit,
+    onUndo: () -> Unit,
+    onSave: (page: Int) -> Unit,
 ) {
     val doc = state.doc
     val count = doc.pageCount
@@ -120,12 +146,141 @@ fun ReaderScreen(
     var chrome by remember { mutableStateOf(true) }
     var askPage by remember { mutableStateOf(false) }
     var selection by remember { mutableStateOf<Selection?>(null) }
+    var markColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
+    var drawing by rememberSaveable { mutableStateOf(false) }
+    // Text box or note waiting for a tap on the page, then the one being written
+    var placing by remember { mutableStateOf<MarkKind?>(null) }
+    var draft by remember { mutableStateOf<Draft?>(null) }
+    var textColor by rememberSaveable { mutableIntStateOf(MarkColors.BLACK) }
+    var textSize by rememberSaveable { mutableIntStateOf(1) }
+    var noteColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
+    // A text box or note being dragged or pinched, shown in place of the saved one
+    var preview by remember { mutableStateOf<Mark?>(null) }
+    // Signing: the sheet is open, then the chosen signature waits for a tap on the page
+    var signing by remember { mutableStateOf(false) }
+    var pendingSignature by remember { mutableStateOf<Signature?>(null) }
+    // A text or choice form field being filled
+    var fillingField by remember { mutableStateOf<FormField?>(null) }
+
+    /** A field's value as saved in the file (for radio groups, the ticked box anywhere in the form). */
+    fun currentValue(field: FormField): String {
+        if (field.kind != FieldKind.RADIO && field.kind != FieldKind.CHECK) return field.value
+        return (0 until doc.pageCount).asSequence()
+            .flatMap { doc.text.cachedFields(it).asSequence() }
+            .filter { it.name == field.name }
+            .map { it.value }
+            .firstOrNull { it != "Off" } ?: "Off"
+    }
+    // Selected text waiting for its replacement words
+    var replacing by remember { mutableStateOf<Selection?>(null) }
+
+    /** Changes the page's own text under [sel] to [text] when saved (empty removes it). */
+    fun replaceMark(sel: Selection, text: String): Mark {
+        // Same size, line and font style as the first selected letter, for the preview
+        val g = sel.firstGlyph
+        val first = sel.boxes.first()
+        val size = g?.size?.takeIf { it > 0f } ?: (first.height() * doc.pages[sel.page].aspect / 1.07f)
+        val line = g?.baseline?.takeIf { it > 0f } ?: (first.bottom - first.height() * 0.25f)
+        return Mark(
+            sel.page, MarkKind.REPLACE, sel.boxes, 0x000000, text,
+            fontSize = size, baseline = line, fontName = g?.font ?: "",
+        )
+    }
+
+    /**
+     * Adds a text change after reading the colours around it from the page, so
+     * the preview shows e.g. white text on a red header, not black on white.
+     */
+    fun addReplace(sel: Selection, text: String) {
+        val base = replaceMark(sel, text)
+        // Changing the same words again replaces the earlier change instead of stacking
+        Edits.apply(emptyList(), edits, sel.page)
+            .filter { m -> m.kind == MarkKind.REPLACE && m.boxes.any { a -> base.boxes.any { b -> overlaps(a, b) } } }
+            .forEach(onRemoveMark)
+        scope.launch {
+            val page = doc.render(sel.page, 800)
+            val mark = if (page == null) base else {
+                val w = page.width
+                val h = page.height
+                val px = IntArray(w * h)
+                page.getPixels(px, 0, w, 0, 0, w, h)
+                val b = sel.boxes.first()
+                val (bg, ink) = ColorSample.colors(
+                    px, w, h,
+                    (b.left * w).toInt() - 2, (b.top * h).toInt() - 2,
+                    (b.right * w).toInt() + 2, (b.bottom * h).toInt() + 2,
+                )
+                base.copy(color = ink, fill = bg)
+            }
+            onMark(mark)
+        }
+    }
+    var penColor by rememberSaveable { mutableIntStateOf(MarkColors.BLACK) }
+    var penWidth by rememberSaveable { mutableFloatStateOf(Ink.widths[1]) }
+    // The mark tapped for changing (page and id); looked up fresh so colour changes and Undo show at once
+    var editingRef by remember { mutableStateOf<Pair<Int, Long>?>(null) }
+    val editing: Mark? = editingRef?.let { (page, id) ->
+        Edits.apply(doc.text.cachedMarks(page), edits, page).firstOrNull { it.id == id }
+    }
+
+    fun tapped(hit: PageHit?) {
+        val place = placing
+        when {
+            place == MarkKind.SIGN -> {
+                val sig = pendingSignature
+                if (hit != null && sig != null) {
+                    // About a third of the page wide, centred on the finger
+                    val aspect = doc.pages[hit.page].aspect
+                    val w = 0.32f
+                    val h = (w / sig.aspect) / aspect
+                    val box = TextBox.moved(
+                        Mark(hit.page, MarkKind.SIGN, listOf(NBox(0f, 0f, w, h)), 0),
+                        hit.x - w / 2f, hit.y - h / 2f, 1f, aspect,
+                    ).boxes.first()
+                    val mark = Mark(
+                        hit.page, MarkKind.SIGN, listOf(box), sig.color, sig.text,
+                        ink = sig.strokes, width = sig.penWidth, fontName = sig.font,
+                    )
+                    editingRef = hit.page to onMark(mark)
+                    placing = null
+                    pendingSignature = null
+                }
+            }
+            place != null -> if (hit != null) {
+                draft = Draft(place, hit.page, hit.x.coerceIn(0f, 1f), hit.y.coerceIn(0f, 1f), null)
+                placing = null
+            }
+            selection != null -> selection = null
+            editingRef != null -> editingRef = null
+            else -> {
+                val mark = hit?.let { h ->
+                    Edits.apply(doc.text.cachedMarks(h.page), edits, h.page).lastOrNull { it.contains(h.x, h.y) }
+                }
+                // A form box under the finger: tick it, or open it for typing / choosing
+                val field = if (mark == null && hit != null) {
+                    doc.text.cachedFields(hit.page).lastOrNull { !it.readOnly && it.contains(hit.x, hit.y) }
+                } else {
+                    null
+                }
+                when {
+                    mark != null -> editingRef = mark.page to mark.id
+                    field == null -> chrome = !chrome
+                    field.kind == FieldKind.CHECK || field.kind == FieldKind.RADIO -> {
+                        val now = Edits.fills(edits)[field.name] ?: currentValue(field)
+                        onFill(field.name, FormField.tapped(field, now))
+                    }
+                    else -> fillingField = field
+                }
+            }
+        }
+    }
     var findingText by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
 
     // Long-press: find the text on that page (read once, then kept) and select the word
     fun longPress(hit: PageHit) {
+        editingRef = null
         scope.launch {
             val slow = launch {
                 delay(250)
@@ -201,18 +356,44 @@ fun ReaderScreen(
             doc = doc,
             listState = listState,
             selection = selection,
-            onTap = { if (selection != null) selection = null else chrome = !chrome },
+            edits = edits,
+            focused = editing?.id,
+            movable = editing?.takeIf { it.kind == MarkKind.TEXT || it.kind == MarkKind.NOTE || it.kind == MarkKind.SIGN },
+            preview = preview,
+            onPreview = { preview = it },
+            onMoved = { old, new -> onChangeMark(old, new) },
+            pen = if (drawing) Pen(penColor, penWidth) else null,
+            onStroke = { page, points ->
+                val stroke = Ink.simplify(points)
+                onMark(
+                    Mark(
+                        page, MarkKind.INK, listOf(Ink.bounds(listOf(stroke), penWidth)), penColor,
+                        ink = listOf(stroke), width = penWidth,
+                    ),
+                )
+            },
+            onTap = ::tapped,
             onLongPress = ::longPress,
             onDragHandle = ::dragHandle,
         )
 
         AnimatedVisibility(
-            visible = chrome,
+            visible = chrome || drawing,
             enter = fadeIn() + slideInVertically { -it },
             exit = fadeOut() + slideOutVertically { -it },
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
-            TopBar(state.name, current, count, starred, onBack, onStar)
+            TopBar(
+                name = state.name,
+                current = current,
+                count = count,
+                starred = starred,
+                unsaved = edits.size,
+                onBack = onBack,
+                onStar = onStar,
+                onUndo = onUndo,
+                onSave = { onSave(current) },
+            )
         }
 
         AnimatedVisibility(
@@ -241,13 +422,30 @@ fun ReaderScreen(
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
+            fun mark(kind: MarkKind) {
+                val sel = selection ?: return
+                onMark(Mark(sel.page, kind, sel.boxes, markColor, sel.string))
+                selection = null
+            }
             SelectionBar(
+                color = markColor,
+                onColor = { markColor = it },
+                onHighlight = { mark(MarkKind.HIGHLIGHT) },
+                onUnderline = { mark(MarkKind.UNDERLINE) },
                 onCopy = {
                     selection?.let { copyText(context, it.string) }
                     selection = null
                 },
                 onShare = {
                     selection?.let { shareText(context, it.string) }
+                },
+                onReplace = {
+                    selection?.let { replacing = it }
+                    selection = null
+                },
+                onRemove = {
+                    selection?.let { addReplace(it, "") }
+                    selection = null
                 },
                 onSelectPage = {
                     selection = selection?.let { it.copy(start = it.text.firstIndex, end = it.text.lastIndex) }
@@ -271,7 +469,64 @@ fun ReaderScreen(
         }
 
         AnimatedVisibility(
-            visible = chrome && selection == null,
+            visible = drawing,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            PenBar(
+                color = penColor,
+                width = penWidth,
+                onColor = { penColor = it },
+                onWidth = { penWidth = it },
+                onDone = { drawing = false },
+            )
+        }
+
+        AnimatedVisibility(
+            visible = editing != null && selection == null && !drawing,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            // Keeps showing the last mark while sliding away
+            val shown = remember { arrayOfNulls<Mark>(1) }
+            editing?.let { shown[0] = it }
+            shown[0]?.let { m ->
+                val boxy = m.kind == MarkKind.TEXT || m.kind == MarkKind.NOTE || m.kind == MarkKind.SIGN
+                MarkBar(
+                    mark = m,
+                    onColor = { c ->
+                        editing?.let {
+                            // Text boxes and notes are redrawn whole, so a colour change is a change
+                            if (boxy) onChangeMark(it, it.copy(color = c)) else onRecolorMark(it, c)
+                        }
+                    },
+                    onEdit = if (boxy && m.kind != MarkKind.SIGN) {
+                        {
+                            editing?.let { e ->
+                                draft = Draft(e.kind, e.page, e.boxes.first().left, e.boxes.first().top, e)
+                            }
+                            editingRef = null
+                        }
+                    } else {
+                        null
+                    },
+                    onCopy = {
+                        copyText(context, m.text)
+                        editingRef = null
+                    },
+                    onDelete = {
+                        editing?.let(onRemoveMark)
+                        editingRef = null
+                    },
+                    onClose = { editingRef = null },
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = chrome && selection == null && editing == null && !drawing && placing == null,
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -281,8 +536,167 @@ fun ReaderScreen(
                 current = current,
                 onJump = ::jump,
                 onShare = onShare,
+                onPen = {
+                    selection = null
+                    editingRef = null
+                    drawing = true
+                },
+                onText = {
+                    selection = null
+                    editingRef = null
+                    placing = MarkKind.TEXT
+                },
+                onNote = {
+                    selection = null
+                    editingRef = null
+                    placing = MarkKind.NOTE
+                },
+                onSign = {
+                    selection = null
+                    editingRef = null
+                    signing = true
+                },
             )
         }
+    }
+
+    // "Tap where it goes" while placing a text box or note
+    if (placing != null) {
+        Box(Modifier.fillMaxSize()) {
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(start = 12.dp, end = 12.dp, bottom = 14.dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Numio.Surface)
+                    .border(1.dp, Numio.SurfaceHigh, RoundedCornerShape(26.dp))
+                    .padding(start = 20.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    when (placing) {
+                        MarkKind.NOTE -> "Tap where the note goes"
+                        MarkKind.SIGN -> "Tap where the signature goes"
+                        else -> "Tap where the text goes"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = {
+                    placing = null
+                    pendingSignature = null
+                }) { Text("Cancel", color = Numio.TextDim) }
+            }
+        }
+    }
+
+    draft?.let { d -> key(d) {
+        val old = d.existing
+        val aspect = doc.pages[d.page].aspect
+        WriteDialog(
+            title = when {
+                d.kind == MarkKind.NOTE && old == null -> "New note"
+                d.kind == MarkKind.NOTE -> "Note"
+                old == null -> "Add text"
+                else -> "Edit text"
+            },
+            initialText = old?.text ?: "",
+            initialColor = old?.color ?: if (d.kind == MarkKind.NOTE) noteColor else textColor,
+            initialSize = if (d.kind == MarkKind.NOTE) null
+            else old?.let { o -> Mark.fontSizes.indices.minByOrNull { kotlin.math.abs(Mark.fontSizes[it] - o.fontSize) } } ?: textSize,
+            initialFill = (old?.fill ?: -1) >= 0,
+            isNew = old == null,
+            onDone = { text, color, size, fill ->
+                val mark = if (d.kind == MarkKind.NOTE) {
+                    noteColor = color
+                    Mark(d.page, MarkKind.NOTE, listOf(TextBox.noteBox(d.x, d.y, aspect, centred = old == null)), color, text)
+                } else {
+                    textColor = color
+                    textSize = size
+                    val fs = Mark.fontSizes[size]
+                    Mark(
+                        d.page, MarkKind.TEXT, listOf(TextBox.box(text, fs, d.x, d.y, aspect, centred = old == null)),
+                        color, text, fontSize = fs, fill = if (fill) 0xFFFFFF else -1,
+                    )
+                }
+                if (old == null) {
+                    // Picked straight away, so it can be dragged into place or pinched
+                    editingRef = d.page to onMark(mark)
+                } else {
+                    onChangeMark(old, mark)
+                    editingRef = d.page to old.id
+                }
+                draft = null
+            },
+            onDelete = old?.let { o -> { onRemoveMark(o); draft = null } },
+            onDismiss = { draft = null },
+        )
+    } }
+
+    replacing?.let { sel -> key(sel) {
+        var text by remember { mutableStateOf(sel.string) }
+        AlertDialog(
+            onDismissRequest = { replacing = null },
+            containerColor = Numio.Surface,
+            title = { Text("Replace text", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { v -> text = v.replace('\n', ' ') },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Numio.Amber,
+                            cursorColor = Numio.Amber,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "The old words are taken out of the page and these are written in their place, " +
+                            "in the closest standard font.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    addReplace(sel, text.trim())
+                    replacing = null
+                }) { Text("Replace", color = Numio.Amber) }
+            },
+            dismissButton = {
+                TextButton(onClick = { replacing = null }) { Text("Cancel", color = Numio.TextDim) }
+            },
+        )
+    } }
+
+    fillingField?.let { f -> key(f) {
+        val now = Edits.fills(edits)[f.name] ?: f.value
+        val done: (String) -> Unit = { v ->
+            if (v != now) onFill(f.name, v)
+            fillingField = null
+        }
+        if (f.kind == FieldKind.CHOICE && f.options.isNotEmpty()) {
+            FieldChoiceDialog(f, now, onDone = done, onDismiss = { fillingField = null })
+        } else {
+            FieldTextDialog(f, now, onDone = done, onDismiss = { fillingField = null })
+        }
+    } }
+
+    if (signing) {
+        SignDialog(
+            store = signatures,
+            unlocked = signaturesUnlocked,
+            onUnlocked = onSignaturesUnlocked,
+            onUse = { sig ->
+                signing = false
+                pendingSignature = sig
+                placing = MarkKind.SIGN
+            },
+            onDismiss = { signing = false },
+        )
     }
 
     if (askPage) {
@@ -307,7 +721,15 @@ private fun Pages(
     doc: PdfDoc,
     listState: LazyListState,
     selection: Selection?,
-    onTap: () -> Unit,
+    edits: List<Edit>,
+    focused: Long?,
+    movable: Mark?,
+    preview: Mark?,
+    onPreview: (Mark?) -> Unit,
+    onMoved: (old: Mark, new: Mark) -> Unit,
+    pen: Pen?,
+    onStroke: (page: Int, points: FloatArray) -> Unit,
+    onTap: (PageHit?) -> Unit,
     onLongPress: (PageHit) -> Unit,
     onDragHandle: (start: Boolean, hit: PageHit) -> Unit,
 ) {
@@ -322,6 +744,13 @@ private fun Pages(
     val longPress by rememberUpdatedState(onLongPress)
     val dragHandle by rememberUpdatedState(onDragHandle)
     val currentSelection by rememberUpdatedState(selection)
+    val currentPen by rememberUpdatedState(pen)
+    val currentMovable by rememberUpdatedState(movable)
+    val showPreview by rememberUpdatedState(onPreview)
+    val moved by rememberUpdatedState(onMoved)
+    val stroke by rememberUpdatedState(onStroke)
+    // The stroke under the finger right now
+    var live by remember { mutableStateOf<LiveStroke?>(null) }
     val density = LocalDensity.current
 
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
@@ -395,6 +824,73 @@ private fun Pages(
                         val w = size.width.toFloat()
                         val h = size.height.toFloat()
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+
+                        // A picked text box or note: one finger drags it, two fingers resize the text
+                        val mv = currentMovable
+                        val onIt = mv?.let { m -> locate(down.position, w, m.page)?.takeIf { m.contains(it.x, it.y, 0.02f) } }
+                        if (mv != null && onIt != null) {
+                            down.consume()
+                            val info = listState.layoutInfo
+                            val itemH = info.visibleItemsInfo.firstOrNull { it.index == mv.page }?.size?.toFloat() ?: h
+                            val aspect = doc.pages[mv.page].aspect
+                            var now = mv
+                            var dx = 0f
+                            var dy = 0f
+                            var zoom = 1f
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.none { it.pressed }) break
+                                val pan = event.calculatePan()
+                                dx += pan.x / scale / baseWidthPx
+                                dy += pan.y / scale / itemH
+                                if (event.changes.count { it.pressed } >= 2) zoom *= event.calculateZoom()
+                                now = TextBox.moved(mv, dx, dy, zoom, aspect)
+                                showPreview(now)
+                                event.changes.forEach { it.consume() }
+                            }
+                            showPreview(null)
+                            if (dx != 0f || dy != 0f || zoom != 1f) moved(mv, now)
+                            return@awaitEachGesture
+                        }
+
+                        // Pen: one finger draws; a second finger cancels the stroke and scrolls / zooms
+                        val penNow = currentPen
+                        val start = if (penNow != null) locate(down.position, w) else null
+                        if (penNow != null && start != null) {
+                            down.consume()
+                            val pts = ArrayList<Float>()
+                            pts += start.x.coerceIn(0f, 1f)
+                            pts += start.y.coerceIn(0f, 1f)
+                            live = LiveStroke(start.page, pts.toFloatArray(), penNow)
+                            var twoFingers = false
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.count { it.pressed } >= 2) {
+                                    twoFingers = true
+                                    break
+                                }
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                locate(change.position, w, start.page)?.let { h ->
+                                    val x = h.x.coerceIn(0f, 1f)
+                                    val y = h.y.coerceIn(0f, 1f)
+                                    val lx = pts[pts.size - 2]
+                                    val ly = pts[pts.size - 1]
+                                    // Skip points too close to the last to matter
+                                    if (kotlin.math.hypot(x - lx, y - ly) > 0.0012f / scale) {
+                                        pts += x
+                                        pts += y
+                                        live = LiveStroke(start.page, pts.toFloatArray(), penNow)
+                                    }
+                                }
+                                event.changes.forEach { it.consume() }
+                            }
+                            live = null
+                            if (!twoFingers) {
+                                stroke(start.page, pts.toFloatArray())
+                                return@awaitEachGesture
+                            }
+                        }
 
                         // Grabbing a selection handle: drag it, nothing else
                         val sel = currentSelection
@@ -503,9 +999,10 @@ private fun Pages(
                                     else zoomTo(DOUBLE_TAP_ZOOM, down.position, w, h)
                                 } else {
                                     taps.lastAt = upAt
+                                    val at = locate(down.position, w)
                                     taps.job = scope.launch {
                                         delay(260)
-                                        tap()
+                                        tap(at)
                                     }
                                 }
                             }
@@ -524,6 +1021,7 @@ private fun Pages(
                     }
                 },
         ) {
+            val fills = Edits.fills(edits)
             LazyColumn(
                 state = listState,
                 userScrollEnabled = !zoomed,
@@ -544,6 +1042,11 @@ private fun Pages(
                     PageView(
                         doc, index, pageWidth, baseWidthPx, renderWidth,
                         selected = selection?.takeIf { it.page == index }?.boxes,
+                        edits = edits,
+                        fills = fills,
+                        focused = focused,
+                        preview = preview?.takeIf { it.page == index },
+                        live = live?.takeIf { it.page == index },
                         scale = { scale },
                     )
                 }
@@ -560,8 +1063,17 @@ private fun PageView(
     baseWidthPx: Int,
     renderWidthPx: Int,
     selected: List<NBox>?,
+    edits: List<Edit>,
+    fills: Map<String, String>,
+    focused: Long?,
+    preview: Mark?,
+    live: LiveStroke?,
     scale: () -> Float,
 ) {
+    // Marks already saved in the file: Android's renderer doesn't draw them, so we do
+    val saved by produceState(emptyList<Mark>(), index, doc) { value = doc.text.marks(index) }
+    // Fillable form boxes, also left out by Android's renderer
+    val fields by produceState(emptyList<FormField>(), index, doc) { value = doc.text.fields(index) }
     val aspect = doc.pages[index].aspect
     val bitmap by produceState(
         initialValue = doc.cached(index, renderWidthPx) ?: doc.cached(index, baseWidthPx),
@@ -588,12 +1100,27 @@ private fun PageView(
         } else {
             Text("${index + 1}", style = MaterialTheme.typography.bodySmall, color = Numio.Line)
         }
+        if (fields.isNotEmpty()) FormOverlay(fields, fills, bitmap)
+        val applied = Edits.apply(saved, edits, index)
+        val marks = if (preview == null) applied else applied.map { if (it.id == preview.id) preview else it }
+        if (marks.isNotEmpty()) MarksOverlay(marks, focused, scale)
+        if (live != null) LiveInk(live.points, live.pen.width, live.pen.color)
         if (!selected.isNullOrEmpty()) SelectionOverlay(selected, scale)
     }
 }
 
 @Composable
-private fun TopBar(name: String, current: Int, count: Int, starred: Boolean, onBack: () -> Unit, onStar: () -> Unit) {
+private fun TopBar(
+    name: String,
+    current: Int,
+    count: Int,
+    starred: Boolean,
+    unsaved: Int,
+    onBack: () -> Unit,
+    onStar: () -> Unit,
+    onUndo: () -> Unit,
+    onSave: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -609,18 +1136,43 @@ private fun TopBar(name: String, current: Int, count: Int, starred: Boolean, onB
             Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("Page ${current + 1} of $count", style = MaterialTheme.typography.bodySmall)
         }
-        IconButton(onClick = onStar) {
-            Icon(
-                if (starred) PIcons.StarFilled else PIcons.Star,
-                contentDescription = if (starred) "Remove star" else "Star",
-                tint = if (starred) Numio.Amber else Numio.Text,
-            )
+        if (unsaved > 0) {
+            IconButton(onClick = onUndo) {
+                Icon(PIcons.Undo, contentDescription = "Undo last mark", tint = Numio.Text)
+            }
+            Box(
+                Modifier
+                    .padding(horizontal = 4.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Numio.Amber)
+                    .clickable(onClickLabel = "Save marks into the PDF", role = Role.Button, onClick = onSave)
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+            ) {
+                Text("Save", style = MaterialTheme.typography.labelLarge, color = Numio.OnAmber)
+            }
+        } else {
+            IconButton(onClick = onStar) {
+                Icon(
+                    if (starred) PIcons.StarFilled else PIcons.Star,
+                    contentDescription = if (starred) "Remove star" else "Star",
+                    tint = if (starred) Numio.Amber else Numio.Text,
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun BottomBar(doc: PdfDoc, current: Int, onJump: (Int) -> Unit, onShare: () -> Unit) {
+private fun BottomBar(
+    doc: PdfDoc,
+    current: Int,
+    onJump: (Int) -> Unit,
+    onShare: () -> Unit,
+    onPen: () -> Unit,
+    onText: () -> Unit,
+    onNote: () -> Unit,
+    onSign: () -> Unit,
+) {
     val strip = rememberLazyListState(initialFirstVisibleItemIndex = (current - 3).coerceAtLeast(0))
     LaunchedEffect(current) {
         val visible = strip.layoutInfo.visibleItemsInfo
@@ -628,7 +1180,7 @@ private fun BottomBar(doc: PdfDoc, current: Int, onJump: (Int) -> Unit, onShare:
             strip.animateScrollToItem((current - 3).coerceAtLeast(0))
         }
     }
-    Row(
+    Column(
         Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
@@ -636,25 +1188,44 @@ private fun BottomBar(doc: PdfDoc, current: Int, onJump: (Int) -> Unit, onShare:
             .clip(RoundedCornerShape(26.dp))
             .background(Numio.Surface)
             .border(1.dp, Numio.SurfaceHigh, RoundedCornerShape(26.dp))
-            .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 6.dp, vertical = 8.dp),
     ) {
         LazyRow(
             state = strip,
-            modifier = Modifier.weight(1f).height(56.dp),
+            modifier = Modifier.fillMaxWidth().height(56.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            contentPadding = PaddingValues(horizontal = 4.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp),
         ) {
             items(doc.pageCount, key = { it }) { index ->
                 StripPage(doc, index, selected = index == current, onClick = { onJump(index) })
             }
         }
-        IconButton(onClick = onShare) {
-            Icon(PIcons.Share, contentDescription = "Share", tint = Numio.Text)
+        Row(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BarAction(PIcons.Pen, "Pen", onPen)
+            BarAction(PIcons.TextBox, "Text", onText)
+            BarAction(PIcons.Sign, "Sign", onSign)
+            BarAction(PIcons.Note, "Note", onNote)
+            BarAction(PIcons.Share, "Share", onShare)
         }
     }
 }
+
+/** Pen colour (0xRRGGBB) and width (fraction of the page width). */
+data class Pen(val color: Int, val width: Float)
+
+/** The stroke being drawn: page and points so far. */
+class LiveStroke(val page: Int, val points: FloatArray, val pen: Pen)
+
+private fun overlaps(a: NBox, b: NBox): Boolean =
+    a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+
+/** A text box or note about to be written ([existing] null) or changed. */
+data class Draft(val kind: MarkKind, val page: Int, val x: Float, val y: Float, val existing: Mark?)
 
 /** Single tap waits briefly in case it becomes a double tap. */
 private class TapMemory {

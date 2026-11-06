@@ -9,10 +9,22 @@ import kotlin.math.min
  */
 data class NBox(val left: Float, val top: Float, val right: Float, val bottom: Float) {
     fun union(o: NBox) = NBox(min(left, o.left), min(top, o.top), max(right, o.right), max(bottom, o.bottom))
+    fun width() = right - left
+    fun height() = bottom - top
 }
 
 /** One character (or a word / line break marker when [separator] is true). */
-data class Glyph(val text: String, val box: NBox, val separator: Boolean = false)
+data class Glyph(
+    val text: String,
+    val box: NBox,
+    val separator: Boolean = false,
+    /** Text size as a fraction of the page width. */
+    val size: Float = 0f,
+    /** Where the letter sits (its baseline), as a fraction of the page height. */
+    val baseline: Float = 0f,
+    /** The PDF font's name, e.g. "ABCDEF+Arial-BoldMT". */
+    val font: String = "",
+)
 
 /**
  * The text of one page in reading order, with where each character sits.
@@ -122,4 +134,7 @@ data class Selection(val page: Int, val text: PageText, val start: Int, val end:
     val range: IntRange get() = minOf(start, end)..maxOf(start, end)
     val boxes: List<NBox> get() = text.lineBoxes(range)
     val string: String get() = text.text(range)
+
+    /** The first real letter selected, to copy its size, line and font. */
+    val firstGlyph: Glyph? get() = range.asSequence().map { text.glyphs[it] }.firstOrNull { !it.separator }
 }
