@@ -133,7 +133,7 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                     )
                     // Preview until saved: the old words hidden behind the page's own white
                     MarkKind.REPLACE -> drawRect(
-                        color = Color.White,
+                        color = if (m.fill >= 0) Color(0xFF000000.toInt() or m.fill) else Color.White,
                         topLeft = Offset(left, top),
                         size = Size(right - left, bottom - top),
                     )

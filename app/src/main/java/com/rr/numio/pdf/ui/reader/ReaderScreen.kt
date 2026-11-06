@@ -7,6 +7,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.rr.numio.pdf.text.NBox
 import com.rr.numio.pdf.edit.Edit
+import com.rr.numio.pdf.edit.ColorSample
 import com.rr.numio.pdf.edit.Edits
 import com.rr.numio.pdf.edit.Ink
 import com.rr.numio.pdf.edit.TextBox
@@ -161,6 +162,31 @@ fun ReaderScreen(
             sel.page, MarkKind.REPLACE, sel.boxes, 0x000000, text,
             fontSize = size, baseline = line, fontName = g?.font ?: "",
         )
+    }
+
+    /**
+     * Adds a text change after reading the colours around it from the page, so
+     * the preview shows e.g. white text on a red header, not black on white.
+     */
+    fun addReplace(sel: Selection, text: String) {
+        val base = replaceMark(sel, text)
+        scope.launch {
+            val page = doc.render(sel.page, 800)
+            val mark = if (page == null) base else {
+                val w = page.width
+                val h = page.height
+                val px = IntArray(w * h)
+                page.getPixels(px, 0, w, 0, 0, w, h)
+                val b = sel.boxes.first()
+                val (bg, ink) = ColorSample.colors(
+                    px, w, h,
+                    (b.left * w).toInt() - 2, (b.top * h).toInt() - 2,
+                    (b.right * w).toInt() + 2, (b.bottom * h).toInt() + 2,
+                )
+                base.copy(color = ink, fill = bg)
+            }
+            onMark(mark)
+        }
     }
     var penColor by rememberSaveable { mutableIntStateOf(MarkColors.BLACK) }
     var penWidth by rememberSaveable { mutableFloatStateOf(Ink.widths[1]) }
@@ -357,7 +383,7 @@ fun ReaderScreen(
                     selection = null
                 },
                 onRemove = {
-                    selection?.let { onMark(replaceMark(it, "")) }
+                    selection?.let { addReplace(it, "") }
                     selection = null
                 },
                 onSelectPage = {
@@ -563,7 +589,7 @@ fun ReaderScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    onMark(replaceMark(sel, text.trim()))
+                    addReplace(sel, text.trim())
                     replacing = null
                 }) { Text("Replace", color = Numio.Amber) }
             },

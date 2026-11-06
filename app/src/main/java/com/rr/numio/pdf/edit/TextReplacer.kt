@@ -120,9 +120,11 @@ object TextReplacer {
         // The PDF's own font when it has every letter needed (it often does for
         // dates and numbers), otherwise the closest standard one
         val font = if (hasAllLetters(first.font, m.text)) first.font else standardFont(first.fontName)
-        val r = ((first.color shr 16) and 0xFF) / 255f
-        val g = ((first.color shr 8) and 0xFF) / 255f
-        val bl = (first.color and 0xFF) / 255f
+        // The colour the PDF drew the old text in; if it can't be read, the one seen on screen
+        val ink = first.color ?: m.color
+        val r = ((ink shr 16) and 0xFF) / 255f
+        val g = ((ink shr 8) and 0xFF) / 255f
+        val bl = (ink and 0xFF) / 255f
 
         if (encodable(font, m.text)) {
             cs.beginText()
@@ -141,7 +143,7 @@ object TextReplacer {
             val bitmap = Bitmap.createBitmap(
                 (wPt * scale).toInt().coerceIn(1, 4096), (hPt * scale).toInt().coerceIn(1, 4096), Bitmap.Config.ARGB_8888,
             )
-            TextBox.draw(Canvas(bitmap), m.text, sy * scale, 0xFF000000.toInt() or first.color, 0f, 0f)
+            TextBox.draw(Canvas(bitmap), m.text, sy * scale, 0xFF000000.toInt() or ink, 0f, 0f)
             val image = LosslessFactory.createFromImage(doc, bitmap)
             bitmap.recycle()
             cs.drawImage(image, t.translateX, t.translateY - hPt * 0.7f, wPt, hPt)
@@ -265,7 +267,7 @@ object TextReplacer {
     }
 
     /** Where the first replaced letter of a mark was drawn, and how. */
-    class First(val matrix: Matrix, val font: PDFont, val fontName: String, val color: Int)
+    class First(val matrix: Matrix, val font: PDFont, val fontName: String, val color: Int?)
 
     class Glyph(val markId: Long?, val gap: Float)
 
@@ -345,8 +347,8 @@ object TextReplacer {
             }
             current?.glyphs?.add(Glyph(mark?.id, gap))
             if (mark != null && mark.id !in firsts) {
-                val color = runCatching { graphicsState.nonStrokingColor.toRGB() }.getOrNull() ?: 0
-                firsts[mark.id] = First(textRenderingMatrix.clone(), font, font.name ?: "", color and 0xFFFFFF)
+                val color = runCatching { graphicsState.nonStrokingColor.toRGB() }.getOrNull()
+                firsts[mark.id] = First(textRenderingMatrix.clone(), font, font.name ?: "", color?.and(0xFFFFFF))
             }
         }
     }
