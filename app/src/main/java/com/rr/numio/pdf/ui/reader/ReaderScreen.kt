@@ -90,6 +90,7 @@ import com.rr.numio.pdf.ui.theme.Numio
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private const val MAX_ZOOM = 5f
@@ -113,13 +114,37 @@ fun ReaderScreen(
     var chrome by remember { mutableStateOf(true) }
     var askPage by remember { mutableStateOf(false) }
 
-    // The page under the middle of the screen counts as the one being read
+    // After a jump (thumbnail or Go to page) that page is current until you scroll,
+    // even if it is too short to reach the middle of the screen.
+    var pinned by remember { mutableStateOf<Int?>(null) }
+    val jumpJob = remember { arrayOfNulls<Job>(1) }
+    fun jump(index: Int) {
+        jumpJob[0]?.cancel()
+        jumpJob[0] = scope.launch {
+            listState.scrollToItem(index)
+            pinned = index
+            val here = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+            snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }.first { it != here }
+            pinned = null
+        }
+    }
+
+    // Otherwise the page under the middle of the screen is the one being read.
+    // At the very end the last page counts, so a short last page (like a wide
+    // landscape one) can still become current.
     val current by remember {
         derivedStateOf {
-            val info = listState.layoutInfo
-            val middle = (info.viewportStartOffset + info.viewportEndOffset) / 2
-            info.visibleItemsInfo.firstOrNull { it.offset <= middle && it.offset + it.size >= middle }?.index
-                ?: listState.firstVisibleItemIndex
+            pinned ?: run {
+                val info = listState.layoutInfo
+                val visible = info.visibleItemsInfo
+                if (!listState.canScrollForward && listState.canScrollBackward && visible.isNotEmpty()) {
+                    visible.last().index
+                } else {
+                    val middle = (info.viewportStartOffset + info.viewportEndOffset) / 2
+                    visible.firstOrNull { it.offset <= middle && it.offset + it.size >= middle }?.index
+                        ?: listState.firstVisibleItemIndex
+                }
+            }
         }
     }
 
@@ -173,7 +198,7 @@ fun ReaderScreen(
             BottomBar(
                 doc = doc,
                 current = current,
-                onJump = { scope.launch { listState.scrollToItem(it) } },
+                onJump = ::jump,
                 onShare = onShare,
             )
         }
@@ -185,7 +210,7 @@ fun ReaderScreen(
             onDismiss = { askPage = false },
             onGo = {
                 askPage = false
-                scope.launch { listState.scrollToItem(it) }
+                jump(it)
             },
         )
     }
@@ -449,29 +474,39 @@ private class TapMemory {
     var lastAt = 0L
 }
 
-private const val STRIP_PX = 96
+private val STRIP_HEIGHT = 48.dp
+private val STRIP_MAX_WIDTH = 72.dp
 
 @Composable
 private fun StripPage(doc: PdfDoc, index: Int, selected: Boolean, onClick: () -> Unit) {
     val aspect = doc.pages[index].aspect
-    val bitmap by produceState<Bitmap?>(doc.cached(index, STRIP_PX), index) {
-        doc.render(index, STRIP_PX)?.let { value = it }
+    // Tall pages are 48 dp high; wide (landscape) pages are capped in width and fitted
+    val width = minOf(STRIP_HEIGHT / aspect, STRIP_MAX_WIDTH)
+    val height = minOf(STRIP_HEIGHT, width * aspect)
+    // Drawn at twice the shown size so the little pages stay crisp
+    val px = with(LocalDensity.current) { width.roundToPx() * 2 }.coerceIn(32, 400)
+    val bitmap by produceState<Bitmap?>(doc.cached(index, px), index, px) {
+        doc.render(index, px)?.let { value = it }
     }
     val shape = RoundedCornerShape(3.dp)
-    val height = 48.dp
     Box(
         Modifier
-            .height(height)
-            .width(height / aspect)
-            .then(if (selected) Modifier.border(2.dp, Numio.Amber, shape) else Modifier)
-            .padding(if (selected) 3.dp else 0.dp)
-            .clip(shape)
-            .background(Numio.Paper)
+            .height(STRIP_HEIGHT)
             .clickable(onClickLabel = "Go to page ${index + 1}", onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        bitmap?.let { b ->
-            val image = remember(b) { b.asImageBitmap() }
-            Image(image, contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
+        Box(
+            Modifier
+                .size(width, height)
+                .then(if (selected) Modifier.border(2.dp, Numio.Amber, shape) else Modifier)
+                .padding(if (selected) 3.dp else 0.dp)
+                .clip(shape)
+                .background(Numio.Paper),
+        ) {
+            bitmap?.let { b ->
+                val image = remember(b) { b.asImageBitmap() }
+                Image(image, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+            }
         }
     }
 }
