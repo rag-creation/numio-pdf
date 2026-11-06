@@ -109,7 +109,12 @@ class TextExtractor(private val context: Context, private val source: Uri) {
                             right = ((left + tp.widthDirAdj) / pageW).coerceIn(0f, 1f),
                             bottom = ((baseline + maxOf(h * 0.3f, tp.fontSizeInPt * 0.26f)) / pageH).coerceIn(0f, 1f),
                         )
-                        glyphs += Glyph(unicode, box, separator = unicode.isBlank())
+                        val pts = tp.fontSizeInPt.takeIf { it >= 1f } ?: tp.yScale
+                        glyphs += Glyph(
+                            unicode, box, separator = unicode.isBlank(),
+                            size = pts / pageW, baseline = (baseline / pageH).coerceIn(0f, 1f),
+                            font = tp.font?.name ?: "",
+                        )
                     }
                 }
 

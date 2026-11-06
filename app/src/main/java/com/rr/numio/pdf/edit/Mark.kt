@@ -40,6 +40,9 @@ data class Mark(
     val fontSize: Float = 0f,
     /** Background behind a text box (0xRRGGBB), or -1 for none. Covers what's under it. */
     val fill: Int = -1,
+    /** [MarkKind.REPLACE]: the line the old text sat on (fraction of page height) and its font name. */
+    val baseline: Float = 0f,
+    val fontName: String = "",
 ) {
     val saved: Boolean get() = ref >= 0
 

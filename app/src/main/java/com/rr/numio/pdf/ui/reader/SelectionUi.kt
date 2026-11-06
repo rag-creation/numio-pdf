@@ -153,10 +153,9 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                 MarkKind.NOTE -> drawNote(m.boxes.first(), c)
                 MarkKind.REPLACE -> if (m.text.isNotEmpty()) {
                     val b = m.boxes.first()
-                    TextBox.draw(
+                    TextBox.drawOnLine(
                         drawContext.canvas.nativeCanvas, m.text, m.fontSize * size.width,
-                        0xFF000000.toInt(), b.left * size.width - m.fontSize * size.width * 0.35f,
-                        b.top * size.height - m.fontSize * size.width * 0.2f,
+                        0xFF000000.toInt() or m.color, b.left * size.width, m.baseline * size.height, m.fontName,
                     )
                 }
                 else -> Unit

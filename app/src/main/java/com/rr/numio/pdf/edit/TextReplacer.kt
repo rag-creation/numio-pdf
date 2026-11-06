@@ -50,7 +50,9 @@ import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import com.tom_roush.pdfbox.util.Matrix
 import com.tom_roush.pdfbox.util.Vector
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import com.tom_roush.pdfbox.pdmodel.font.PDVectorFont
 import kotlin.math.sqrt
 
 /**
@@ -115,7 +117,9 @@ object TextReplacer {
         val d = t.getValue(1, 1)
         val sx = sqrt(a * a + b * b).takeIf { it > 0f } ?: 1f
         val sy = sqrt(c * c + d * d).takeIf { it > 0f } ?: 1f
-        val font = standardFont(first.fontName)
+        // The PDF's own font when it has every letter needed (it often does for
+        // dates and numbers), otherwise the closest standard one
+        val font = if (hasAllLetters(first.font, m.text)) first.font else standardFont(first.fontName)
         val r = ((first.color shr 16) and 0xFF) / 255f
         val g = ((first.color shr 8) and 0xFF) / 255f
         val bl = (first.color and 0xFF) / 255f
@@ -141,6 +145,20 @@ object TextReplacer {
             val image = LosslessFactory.createFromImage(doc, bitmap)
             bitmap.recycle()
             cs.drawImage(image, t.translateX, t.translateY - hPt * 0.7f, wPt, hPt)
+        }
+    }
+
+    private fun hasAllLetters(font: PDFont, text: String): Boolean {
+        if (text.contains('\n')) return false
+        val vector = font as? PDVectorFont ?: return false
+        return try {
+            val input = ByteArrayInputStream(font.encode(text))
+            while (input.available() > 0) {
+                if (!vector.hasGlyph(font.readCode(input))) return false
+            }
+            true
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -247,7 +265,7 @@ object TextReplacer {
     }
 
     /** Where the first replaced letter of a mark was drawn, and how. */
-    class First(val matrix: Matrix, val fontName: String, val color: Int)
+    class First(val matrix: Matrix, val font: PDFont, val fontName: String, val color: Int)
 
     class Glyph(val markId: Long?, val gap: Float)
 
@@ -328,7 +346,7 @@ object TextReplacer {
             current?.glyphs?.add(Glyph(mark?.id, gap))
             if (mark != null && mark.id !in firsts) {
                 val color = runCatching { graphicsState.nonStrokingColor.toRGB() }.getOrNull() ?: 0
-                firsts[mark.id] = First(textRenderingMatrix.clone(), font.name ?: "", color and 0xFFFFFF)
+                firsts[mark.id] = First(textRenderingMatrix.clone(), font, font.name ?: "", color and 0xFFFFFF)
             }
         }
     }
