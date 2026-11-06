@@ -45,6 +45,31 @@ object TextBox {
         return NBox(left, top, left + w, top + h)
     }
 
+    /** The phone font closest to a PDF font, for previews. */
+    fun typefaceFor(pdfFont: String): Typeface {
+        val n = pdfFont.lowercase()
+        val bold = "bold" in n || "black" in n || "heavy" in n
+        val italic = "italic" in n || "oblique" in n
+        val family = when {
+            "courier" in n || "mono" in n -> Typeface.MONOSPACE
+            "times" in n || ("serif" in n && "sans" !in n) || "georgia" in n || "garamond" in n -> Typeface.SERIF
+            else -> Typeface.SANS_SERIF
+        }
+        val style = when {
+            bold && italic -> Typeface.BOLD_ITALIC
+            bold -> Typeface.BOLD
+            italic -> Typeface.ITALIC
+            else -> Typeface.NORMAL
+        }
+        return Typeface.create(family, style)
+    }
+
+    /** One line of text standing on [baseline], starting at [left]. */
+    fun drawOnLine(canvas: Canvas, text: String, fontPx: Float, color: Int, left: Float, baseline: Float, pdfFont: String) {
+        val p = paint(fontPx, color).apply { typeface = typefaceFor(pdfFont) }
+        canvas.drawText(text, left, baseline, p)
+    }
+
     /** Smallest and largest text, as fractions of the page width. */
     const val MIN_FONT = 0.008f
     const val MAX_FONT = 0.15f

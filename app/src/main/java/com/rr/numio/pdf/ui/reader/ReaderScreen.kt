@@ -152,10 +152,15 @@ fun ReaderScreen(
 
     /** Changes the page's own text under [sel] to [text] when saved (empty removes it). */
     fun replaceMark(sel: Selection, text: String): Mark {
+        // Same size, line and font style as the first selected letter, for the preview
+        val g = sel.firstGlyph
         val first = sel.boxes.first()
-        // Text size from the line height (selection boxes are about 1.45 × the text size)
-        val size = first.height() * doc.pages[sel.page].aspect / 1.45f
-        return Mark(sel.page, MarkKind.REPLACE, sel.boxes, 0x000000, text, fontSize = size)
+        val size = g?.size?.takeIf { it > 0f } ?: (first.height() * doc.pages[sel.page].aspect / 1.07f)
+        val line = g?.baseline?.takeIf { it > 0f } ?: (first.bottom - first.height() * 0.25f)
+        return Mark(
+            sel.page, MarkKind.REPLACE, sel.boxes, 0x000000, text,
+            fontSize = size, baseline = line, fontName = g?.font ?: "",
+        )
     }
     var penColor by rememberSaveable { mutableIntStateOf(MarkColors.BLACK) }
     var penWidth by rememberSaveable { mutableFloatStateOf(Ink.widths[1]) }
