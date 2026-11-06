@@ -112,9 +112,10 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                         size = Size(right - left, bottom - top),
                         blendMode = BlendMode.Multiply,
                     )
+                    // Just under the box, so it clears the tails of g, y and p
                     MarkKind.UNDERLINE -> drawRect(
                         color = c,
-                        topLeft = Offset(left, bottom - thick),
+                        topLeft = Offset(left, bottom),
                         size = Size(right - left, thick),
                     )
                     MarkKind.STRIKEOUT -> drawRect(
