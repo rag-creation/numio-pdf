@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder icon until RR draws the real one: a page with a folded
+     corner in Numio amber #FFC21A, three text lines and the cream Numio dot.
+     Kept in the middle (about 44 of 108) so zooming launchers show it whole. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Page outline with folded top-right corner -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFC21A"
+        android:strokeWidth="3.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M40,33 H60 L70,43 V71 Q70,75 66,75 H40 Q36,75 36,71 V37 Q36,33 40,33 Z M60,33 V43 H70" />
+    <!-- Text lines -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFC21A"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:pathData="M43,52 H63 M43,59 H63 M43,66 H54" />
+    <!-- Numio dot -->
+    <path
+        android:fillColor="#FFF1EEE6"
+        android:pathData="M59,66 a3.2,3.2 0 1,1 6.4,0 a3.2,3.2 0 1,1 -6.4,0 Z" />
+</vector>
