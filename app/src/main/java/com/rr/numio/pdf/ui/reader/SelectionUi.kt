@@ -22,6 +22,11 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import com.rr.numio.pdf.edit.Ink
 import com.rr.numio.pdf.edit.Mark
 import com.rr.numio.pdf.edit.MarkColors
 import com.rr.numio.pdf.edit.MarkKind
@@ -123,6 +128,115 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                         topLeft = Offset(left, (top + bottom) / 2f - thick / 2f),
                         size = Size(right - left, thick),
                     )
+                    MarkKind.INK -> Unit // drawn below, from its strokes
+                }
+            }
+            if (m.kind == MarkKind.INK) drawInk(m.ink, m.width, c)
+        }
+    }
+}
+
+/** Pen strokes with round ends; a single point becomes a dot. */
+fun DrawScope.drawInk(strokes: List<FloatArray>, width: Float, color: Color) {
+    val w = (width * size.width).coerceAtLeast(1f)
+    strokes.forEach { p ->
+        if (p.size < 2) return@forEach
+        if (p.size == 2) {
+            drawCircle(color, radius = w / 2f, center = Offset(p[0] * size.width, p[1] * size.height))
+            return@forEach
+        }
+        val path = Path().apply {
+            moveTo(p[0] * size.width, p[1] * size.height)
+            var i = 2
+            while (i + 1 < p.size) {
+                lineTo(p[i] * size.width, p[i + 1] * size.height)
+                i += 2
+            }
+        }
+        drawPath(path, color, style = Stroke(width = w, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+/** The stroke being drawn right now, before the finger lifts. */
+@Composable
+fun BoxScope.LiveInk(points: FloatArray, width: Float, color: Int) {
+    Canvas(Modifier.matchParentSize()) {
+        drawInk(listOf(points), width, Color(0xFF000000.toInt() or color))
+    }
+}
+
+/** Shown while drawing: pen colour, pen size and Done. */
+@Composable
+fun PenBar(
+    color: Int,
+    width: Float,
+    onColor: (Int) -> Unit,
+    onWidth: (Float) -> Unit,
+    onDone: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, bottom = 14.dp)
+            .clip(RoundedCornerShape(26.dp))
+            .background(Numio.Surface)
+            .border(1.dp, Numio.SurfaceHigh, RoundedCornerShape(26.dp))
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Pen", style = MaterialTheme.typography.titleSmall)
+                Text("Two fingers to scroll or zoom", style = MaterialTheme.typography.bodySmall)
+            }
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Numio.Amber)
+                    .clickable(role = Role.Button, onClick = onDone)
+                    .padding(horizontal = 18.dp, vertical = 9.dp),
+            ) {
+                Text("Done", style = MaterialTheme.typography.labelLarge, color = Numio.OnAmber)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            MarkColors.all.forEach { c ->
+                val selected = c == color
+                Box(
+                    Modifier
+                        .size(28.dp)
+                        .then(if (selected) Modifier.border(2.dp, Numio.Text, CircleShape) else Modifier)
+                        .padding(if (selected) 4.dp else 2.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF000000.toInt() or c))
+                        .border(1.dp, Numio.Line, CircleShape)
+                        .clickable(onClickLabel = MarkColors.name(c), role = Role.RadioButton) { onColor(c) },
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Ink.widths.forEachIndexed { i, w ->
+                val selected = w == width
+                Box(
+                    Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(if (selected) Numio.SurfaceHigh else Color.Transparent)
+                        .clickable(onClickLabel = listOf("Fine", "Medium", "Bold")[i], role = Role.RadioButton) { onWidth(w) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier
+                            .size((4 + i * 4).dp)
+                            .clip(CircleShape)
+                            .background(if (selected) Numio.Amber else Numio.Text),
+                    )
                 }
             }
         }
@@ -204,6 +318,7 @@ fun MarkBar(
         MarkKind.HIGHLIGHT -> "Highlight"
         MarkKind.UNDERLINE -> "Underline"
         MarkKind.STRIKEOUT -> "Strike-out"
+        MarkKind.INK -> "Drawing"
     }
     Column(
         Modifier

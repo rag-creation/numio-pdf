@@ -3,7 +3,7 @@ package com.rr.numio.pdf.edit
 import com.rr.numio.pdf.text.NBox
 
 /** The kinds of text marks PDF Reader draws and saves. */
-enum class MarkKind { HIGHLIGHT, UNDERLINE, STRIKEOUT }
+enum class MarkKind { HIGHLIGHT, UNDERLINE, STRIKEOUT, INK }
 
 /**
  * A highlight / underline over text on one page. [boxes] are one per line,
@@ -20,6 +20,10 @@ data class Mark(
     val text: String = "",
     val id: Long = 0L,
     val ref: Int = -1,
+    /** Pen drawing ([MarkKind.INK]): each stroke as u0, v0, u1, v1, … fractions of the page. */
+    val ink: List<FloatArray> = emptyList(),
+    /** Pen width as a fraction of the page width. */
+    val width: Float = 0f,
 ) {
     val saved: Boolean get() = ref >= 0
 

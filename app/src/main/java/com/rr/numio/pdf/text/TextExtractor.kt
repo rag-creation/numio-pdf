@@ -8,6 +8,12 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.cos.COSArray
+import com.tom_roush.pdfbox.cos.COSDictionary
+import com.tom_roush.pdfbox.cos.COSName
+import com.tom_roush.pdfbox.cos.COSNumber
+import com.rr.numio.pdf.edit.Ink
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotation
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationTextMarkup
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
@@ -127,6 +133,7 @@ class TextExtractor(private val context: Context, private val source: Uri) {
             val page = d.getPage(index)
             val geo = geometry(page)
             page.annotations.withIndex().mapNotNull { (ref, any) ->
+                if (any.subtype == "Ink") return@mapNotNull readInk(any, index, ref, geo)
                 val a = any as? PDAnnotationTextMarkup ?: return@mapNotNull null
                 val kind = when (a.subtype) {
                     PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT -> MarkKind.HIGHLIGHT
@@ -147,6 +154,35 @@ class TextExtractor(private val context: Context, private val source: Uri) {
         } catch (e: Throwable) {
             emptyList()
         }
+    }
+
+    /** A pen drawing saved in the file (by this app or any other). */
+    private fun readInk(a: PDAnnotation, page: Int, ref: Int, geo: PageGeometry): Mark? {
+        val dict = a.cosObject
+        val list = dict.getDictionaryObject(COSName.getPDFName("InkList")) as? COSArray ?: return null
+        val strokes = (0 until list.size()).mapNotNull { i ->
+            val path = list.getObject(i) as? COSArray ?: return@mapNotNull null
+            val pts = FloatArray(path.size() / 2 * 2)
+            var k = 0
+            while (k + 1 < path.size()) {
+                val x = (path.getObject(k) as? COSNumber)?.floatValue() ?: return@mapNotNull null
+                val y = (path.getObject(k + 1) as? COSNumber)?.floatValue() ?: return@mapNotNull null
+                val (u, v) = geo.toShown(x, y)
+                pts[k] = u
+                pts[k + 1] = v
+                k += 2
+            }
+            pts.takeIf { it.size >= 2 }
+        }
+        if (strokes.isEmpty()) return null
+        val bs = dict.getDictionaryObject(COSName.BS) as? COSDictionary
+        val points = bs?.getFloat(COSName.W, 1f) ?: 1f
+        val width = (points / geo.shownWidth).coerceIn(0.0005f, 0.05f)
+        val color = runCatching { a.color?.toRGB() }.getOrNull() ?: 0x1A1A1A
+        return Mark(
+            page, MarkKind.INK, listOf(Ink.bounds(strokes, width)), color and 0xFFFFFF, "",
+            Mark.savedId(page, ref), ref, strokes, width,
+        )
     }
 
     companion object {

@@ -16,6 +16,9 @@ data class PageGeometry(
     private val h = (ury - lly).takeIf { it > 0f } ?: 1f
     private val turn = ((rotation % 360) + 360) % 360
 
+    /** Width of the page as shown, in points (height and width swap when turned sideways). */
+    val shownWidth: Float get() = if (turn == 90 || turn == 270) h else w
+
     /** Shown fractions (u across, v down) to PDF points. */
     fun toPdf(u: Float, v: Float): Pair<Float, Float> {
         val (px, py) = when (turn) {

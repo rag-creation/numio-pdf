@@ -8,6 +8,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import com.rr.numio.pdf.text.NBox
 import com.rr.numio.pdf.edit.Edit
 import com.rr.numio.pdf.edit.Edits
+import com.rr.numio.pdf.edit.Ink
 import com.rr.numio.pdf.edit.Mark
 import com.rr.numio.pdf.edit.MarkColors
 import com.rr.numio.pdf.edit.MarkKind
@@ -134,6 +135,9 @@ fun ReaderScreen(
     var askPage by remember { mutableStateOf(false) }
     var selection by remember { mutableStateOf<Selection?>(null) }
     var markColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
+    var drawing by rememberSaveable { mutableStateOf(false) }
+    var penColor by rememberSaveable { mutableIntStateOf(MarkColors.BLACK) }
+    var penWidth by rememberSaveable { mutableFloatStateOf(Ink.widths[1]) }
     // The mark tapped for changing (page and id); looked up fresh so colour changes and Undo show at once
     var editingRef by remember { mutableStateOf<Pair<Int, Long>?>(null) }
     val editing: Mark? = editingRef?.let { (page, id) ->
@@ -236,13 +240,23 @@ fun ReaderScreen(
             selection = selection,
             edits = edits,
             focused = editing?.id,
+            pen = if (drawing) Pen(penColor, penWidth) else null,
+            onStroke = { page, points ->
+                val stroke = Ink.simplify(points)
+                onMark(
+                    Mark(
+                        page, MarkKind.INK, listOf(Ink.bounds(listOf(stroke), penWidth)), penColor,
+                        ink = listOf(stroke), width = penWidth,
+                    ),
+                )
+            },
             onTap = ::tapped,
             onLongPress = ::longPress,
             onDragHandle = ::dragHandle,
         )
 
         AnimatedVisibility(
-            visible = chrome,
+            visible = chrome || drawing,
             enter = fadeIn() + slideInVertically { -it },
             exit = fadeOut() + slideOutVertically { -it },
             modifier = Modifier.align(Alignment.TopCenter),
@@ -325,7 +339,22 @@ fun ReaderScreen(
         }
 
         AnimatedVisibility(
-            visible = editing != null && selection == null,
+            visible = drawing,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            PenBar(
+                color = penColor,
+                width = penWidth,
+                onColor = { penColor = it },
+                onWidth = { penWidth = it },
+                onDone = { drawing = false },
+            )
+        }
+
+        AnimatedVisibility(
+            visible = editing != null && selection == null && !drawing,
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -351,7 +380,7 @@ fun ReaderScreen(
         }
 
         AnimatedVisibility(
-            visible = chrome && selection == null && editing == null,
+            visible = chrome && selection == null && editing == null && !drawing,
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -361,6 +390,11 @@ fun ReaderScreen(
                 current = current,
                 onJump = ::jump,
                 onShare = onShare,
+                onPen = {
+                    selection = null
+                    editingRef = null
+                    drawing = true
+                },
             )
         }
     }
@@ -389,6 +423,8 @@ private fun Pages(
     selection: Selection?,
     edits: List<Edit>,
     focused: Long?,
+    pen: Pen?,
+    onStroke: (page: Int, points: FloatArray) -> Unit,
     onTap: (PageHit?) -> Unit,
     onLongPress: (PageHit) -> Unit,
     onDragHandle: (start: Boolean, hit: PageHit) -> Unit,
@@ -404,6 +440,10 @@ private fun Pages(
     val longPress by rememberUpdatedState(onLongPress)
     val dragHandle by rememberUpdatedState(onDragHandle)
     val currentSelection by rememberUpdatedState(selection)
+    val currentPen by rememberUpdatedState(pen)
+    val stroke by rememberUpdatedState(onStroke)
+    // The stroke under the finger right now
+    var live by remember { mutableStateOf<LiveStroke?>(null) }
     val density = LocalDensity.current
 
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
@@ -477,6 +517,45 @@ private fun Pages(
                         val w = size.width.toFloat()
                         val h = size.height.toFloat()
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+
+                        // Pen: one finger draws; a second finger cancels the stroke and scrolls / zooms
+                        val penNow = currentPen
+                        val start = if (penNow != null) locate(down.position, w) else null
+                        if (penNow != null && start != null) {
+                            down.consume()
+                            val pts = ArrayList<Float>()
+                            pts += start.x.coerceIn(0f, 1f)
+                            pts += start.y.coerceIn(0f, 1f)
+                            live = LiveStroke(start.page, pts.toFloatArray(), penNow)
+                            var twoFingers = false
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.count { it.pressed } >= 2) {
+                                    twoFingers = true
+                                    break
+                                }
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                locate(change.position, w, start.page)?.let { h ->
+                                    val x = h.x.coerceIn(0f, 1f)
+                                    val y = h.y.coerceIn(0f, 1f)
+                                    val lx = pts[pts.size - 2]
+                                    val ly = pts[pts.size - 1]
+                                    // Skip points too close to the last to matter
+                                    if (kotlin.math.hypot(x - lx, y - ly) > 0.0012f / scale) {
+                                        pts += x
+                                        pts += y
+                                        live = LiveStroke(start.page, pts.toFloatArray(), penNow)
+                                    }
+                                }
+                                event.changes.forEach { it.consume() }
+                            }
+                            live = null
+                            if (!twoFingers) {
+                                stroke(start.page, pts.toFloatArray())
+                                return@awaitEachGesture
+                            }
+                        }
 
                         // Grabbing a selection handle: drag it, nothing else
                         val sel = currentSelection
@@ -629,6 +708,7 @@ private fun Pages(
                         selected = selection?.takeIf { it.page == index }?.boxes,
                         edits = edits,
                         focused = focused,
+                        live = live?.takeIf { it.page == index },
                         scale = { scale },
                     )
                 }
@@ -647,6 +727,7 @@ private fun PageView(
     selected: List<NBox>?,
     edits: List<Edit>,
     focused: Long?,
+    live: LiveStroke?,
     scale: () -> Float,
 ) {
     // Marks already saved in the file: Android's renderer doesn't draw them, so we do
@@ -679,6 +760,7 @@ private fun PageView(
         }
         val marks = Edits.apply(saved, edits, index)
         if (marks.isNotEmpty()) MarksOverlay(marks, focused, scale)
+        if (live != null) LiveInk(live.points, live.pen.width, live.pen.color)
         if (!selected.isNullOrEmpty()) SelectionOverlay(selected, scale)
     }
 }
@@ -737,7 +819,7 @@ private fun TopBar(
 }
 
 @Composable
-private fun BottomBar(doc: PdfDoc, current: Int, onJump: (Int) -> Unit, onShare: () -> Unit) {
+private fun BottomBar(doc: PdfDoc, current: Int, onJump: (Int) -> Unit, onShare: () -> Unit, onPen: () -> Unit) {
     val strip = rememberLazyListState(initialFirstVisibleItemIndex = (current - 3).coerceAtLeast(0))
     LaunchedEffect(current) {
         val visible = strip.layoutInfo.visibleItemsInfo
@@ -767,11 +849,20 @@ private fun BottomBar(doc: PdfDoc, current: Int, onJump: (Int) -> Unit, onShare:
                 StripPage(doc, index, selected = index == current, onClick = { onJump(index) })
             }
         }
+        IconButton(onClick = onPen) {
+            Icon(PIcons.Pen, contentDescription = "Draw with the pen", tint = Numio.Text)
+        }
         IconButton(onClick = onShare) {
             Icon(PIcons.Share, contentDescription = "Share", tint = Numio.Text)
         }
     }
 }
+
+/** Pen colour (0xRRGGBB) and width (fraction of the page width). */
+data class Pen(val color: Int, val width: Float)
+
+/** The stroke being drawn: page and points so far. */
+class LiveStroke(val page: Int, val points: FloatArray, val pen: Pen)
 
 /** Single tap waits briefly in case it becomes a double tap. */
 private class TapMemory {
