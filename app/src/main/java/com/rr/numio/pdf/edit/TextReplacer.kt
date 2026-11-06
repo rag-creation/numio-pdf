@@ -156,7 +156,14 @@ object TextReplacer {
         return try {
             val input = ByteArrayInputStream(font.encode(text))
             while (input.available() > 0) {
-                if (!vector.hasGlyph(font.readCode(input))) return false
+                val code = font.readCode(input)
+                if (!vector.hasGlyph(code)) return false
+                // A cut-down font may have a letter's shape but no width for it,
+                // which would print the letters on top of each other
+                val width = font.getWidth(code)
+                if (width <= 0f) return false
+                val drawn = runCatching { font.getWidthFromFont(code) }.getOrNull()
+                if (drawn != null && drawn > 0f && kotlin.math.abs(width - drawn) > drawn * 0.15f + 1f) return false
             }
             true
         } catch (e: Exception) {
