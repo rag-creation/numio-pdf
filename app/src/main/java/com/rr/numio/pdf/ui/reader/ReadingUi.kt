@@ -145,7 +145,11 @@ fun ReadingMenu(
         }
         HorizontalDivider(color = Numio.Line)
         MenuLabel("Layout")
-        listOf(PageLayout.SCROLL to "Scroll", PageLayout.ONE_PAGE to "One page at a time").forEach { (value, label) ->
+        listOf(
+            PageLayout.SCROLL to "Scroll",
+            PageLayout.ONE_PAGE to "One page at a time",
+            PageLayout.BOOK to "Book: full screen, swipe pages",
+        ).forEach { (value, label) ->
             CheckItem(label, value == layout) { onLayout(value) }
         }
     }

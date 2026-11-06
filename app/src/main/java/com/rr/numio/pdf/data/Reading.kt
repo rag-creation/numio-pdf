@@ -6,8 +6,11 @@ import java.net.URLEncoder
 /** How pages are coloured: as printed, light-on-dark for night reading, or warm paper. */
 enum class PageLook { NORMAL, DARK, SEPIA }
 
-/** Pages one under another, or one page at a time, each fitted to the screen. */
-enum class PageLayout { SCROLL, ONE_PAGE }
+/**
+ * Pages one under another; one page at a time (still scrolling down); or
+ * like a book: full screen, swiping right to left.
+ */
+enum class PageLayout { SCROLL, ONE_PAGE, BOOK }
 
 /** A page the reader marked to come back to, with a name they can change. */
 data class Bookmark(val page: Int, val name: String)

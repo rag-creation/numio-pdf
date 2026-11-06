@@ -94,10 +94,13 @@ fun SettingsScreen(
             )
             Label("Layout")
             Choices(
-                listOf(PageLayout.SCROLL to "Scroll", PageLayout.ONE_PAGE to "One page"),
+                listOf(PageLayout.SCROLL to "Scroll", PageLayout.ONE_PAGE to "One page", PageLayout.BOOK to "Book"),
                 layout, onLayout,
             )
-            Hint("Also in the ⋮ menu while reading. Night and sepia only change the screen, never your files.")
+            Hint(
+                "Book: each page full screen, swipe right to left, with a reading lock. " +
+                    "Also in the ⋮ menu while reading. Night and sepia only change the screen, never your files.",
+            )
 
             Section("Privacy")
             Hint(

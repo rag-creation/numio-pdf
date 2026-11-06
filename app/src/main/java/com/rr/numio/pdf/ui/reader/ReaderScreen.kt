@@ -365,6 +365,22 @@ fun ReaderScreen(
         }
     }
 
+    if (layout == PageLayout.BOOK) {
+        BookReader(
+            doc = doc,
+            name = state.name,
+            start = current,
+            look = look,
+            edits = edits,
+            onPage = { savePage(it) },
+            onExit = { page ->
+                onLayout(PageLayout.SCROLL)
+                jump(page)
+            },
+        )
+        return
+    }
+
     Box(Modifier.fillMaxSize().background(Numio.Bg)) {
         Pages(
             doc = doc,
@@ -1129,7 +1145,7 @@ private fun Pages(
 }
 
 @Composable
-private fun PageView(
+internal fun PageView(
     doc: PdfDoc,
     index: Int,
     width: Dp,
