@@ -30,6 +30,8 @@ android {
             optimization {
                 enable = true
             }
+            // Keeps PdfBox working after shrinking (see the file for why)
+            proguardFiles("proguard-rules.pro")
         }
     }
     compileOptions {
@@ -58,8 +60,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
-    // Pages are drawn by Android's own PDF renderer (android.graphics.pdf),
-    // so milestone 1 adds no PDF library at all.
+    // Pages are drawn by Android's own PDF renderer (android.graphics.pdf).
+    // PdfBox (Apache-2.0) reads where the text sits, for selecting and copying.
+    implementation(libs.pdfbox.android)
 
     testImplementation(libs.junit)
 
