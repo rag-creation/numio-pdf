@@ -11,6 +11,14 @@ import com.tom_roush.pdfbox.pdmodel.graphics.color.PDColor
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceRGB
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotation
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationTextMarkup
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAppearanceDictionary
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAppearanceStream
+import com.tom_roush.pdfbox.cos.COSArray
+import com.tom_roush.pdfbox.cos.COSDictionary
+import com.tom_roush.pdfbox.cos.COSFloat
+import com.tom_roush.pdfbox.cos.COSName
+import com.rr.numio.pdf.text.PageGeometry
+import java.util.Locale
 import java.io.File
 import java.util.Calendar
 import kotlinx.coroutines.Dispatchers
@@ -53,17 +61,23 @@ object PdfSaver {
 
                         // New colours for marks already in the file
                         plan.recolored.filter { m -> m.page == index }.forEach { m ->
-                            val a = annotations.getOrNull(m.ref) as? PDAnnotationTextMarkup ?: return@forEach
+                            val a = annotations.getOrNull(m.ref)?.takeIf(::editable) ?: return@forEach
                             a.color = PDColor(rgb(m.color), PDDeviceRGB.INSTANCE)
-                            a.appearance = null
                             a.setModifiedDate(Calendar.getInstance())
-                            runCatching { a.constructAppearances() }
+                            if (m.kind == MarkKind.INK) {
+                                a.appearance = inkAppearance(it, m, geo)
+                            } else {
+                                a.appearance = null
+                                runCatching { a.constructAppearances() }
+                            }
                         }
                         // Deleted marks, from the back so earlier positions stay right
                         plan.removed.filter { m -> m.page == index }.map { m -> m.ref }.sortedDescending().forEach { ref ->
-                            if (annotations.getOrNull(ref) is PDAnnotationTextMarkup) annotations.removeAt(ref)
+                            if (annotations.getOrNull(ref)?.let(::editable) == true) annotations.removeAt(ref)
                         }
-                        plan.added.filter { m -> m.page == index }.forEach { m -> annotations.add(annotation(m, geo)) }
+                        plan.added.filter { m -> m.page == index }.forEach { m ->
+                            annotations.add(if (m.kind == MarkKind.INK) ink(it, m, geo) else annotation(m, geo))
+                        }
                         page.annotations = annotations
                     }
                     it.save(temp)
@@ -93,17 +107,23 @@ object PdfSaver {
         }
     }
 
+    /** Only marks PDF Reader shows and edits are ever changed or removed. */
+    private val editableTypes = setOf("Highlight", "Underline", "StrikeOut", "Squiggly", "Ink")
+
+    private fun editable(a: PDAnnotation): Boolean = a.subtype in editableTypes
+
     private fun rgb(color: Int) = floatArrayOf(
         ((color shr 16) and 0xFF) / 255f,
         ((color shr 8) and 0xFF) / 255f,
         (color and 0xFF) / 255f,
     )
 
-    private fun annotation(m: Mark, geo: com.rr.numio.pdf.text.PageGeometry): PDAnnotationTextMarkup {
+    private fun annotation(m: Mark, geo: PageGeometry): PDAnnotationTextMarkup {
         val subtype = when (m.kind) {
             MarkKind.HIGHLIGHT -> PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT
             MarkKind.UNDERLINE -> PDAnnotationTextMarkup.SUB_TYPE_UNDERLINE
             MarkKind.STRIKEOUT -> PDAnnotationTextMarkup.SUB_TYPE_STRIKEOUT
+            MarkKind.INK -> error("ink is saved by ink()")
         }
         val quads = FloatArray(m.boxes.size * 8)
         var minX = Float.MAX_VALUE
@@ -128,5 +148,82 @@ object PdfSaver {
             // Drawing instructions inside the file, so every PDF app shows the mark the same way
             runCatching { constructAppearances() }
         }
+    }
+
+    /** A pen drawing as a standard Ink annotation, with its own drawing instructions. */
+    private fun ink(doc: PDDocument, m: Mark, geo: PageGeometry): PDAnnotation {
+        val dict = COSDictionary()
+        dict.setName(COSName.TYPE, "Annot")
+        dict.setName(COSName.SUBTYPE, "Ink")
+        val a = PDAnnotation.createAnnotation(dict)
+        val list = COSArray()
+        m.ink.forEach { stroke ->
+            val path = COSArray()
+            var i = 0
+            while (i + 1 < stroke.size) {
+                val (x, y) = geo.toPdf(stroke[i], stroke[i + 1])
+                path.add(COSFloat(x))
+                path.add(COSFloat(y))
+                i += 2
+            }
+            list.add(path)
+        }
+        dict.setItem(COSName.getPDFName("InkList"), list)
+        dict.setItem(COSName.BS, COSDictionary().apply { setFloat(COSName.W, penPoints(m, geo)) })
+        a.rectangle = pdfRect(m, geo)
+        a.color = PDColor(rgb(m.color), PDDeviceRGB.INSTANCE)
+        a.isPrinted = true
+        a.setModifiedDate(Calendar.getInstance())
+        a.appearance = inkAppearance(doc, m, geo)
+        return a
+    }
+
+    private fun penPoints(m: Mark, geo: PageGeometry) = (m.width * geo.shownWidth).coerceAtLeast(0.5f)
+
+    /** The drawing's box in PDF points (the strokes' box already includes the pen width). */
+    private fun pdfRect(m: Mark, geo: PageGeometry): PDRectangle {
+        val q = geo.quad(m.boxes.first())
+        var minX = Float.MAX_VALUE
+        var minY = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE
+        var maxY = -Float.MAX_VALUE
+        for (k in 0 until 4) {
+            minX = minOf(minX, q[k * 2]); maxX = maxOf(maxX, q[k * 2])
+            minY = minOf(minY, q[k * 2 + 1]); maxY = maxOf(maxY, q[k * 2 + 1])
+        }
+        return PDRectangle(minX, minY, maxX - minX, maxY - minY)
+    }
+
+    /**
+     * How the drawing looks, written into the file so every PDF app shows the
+     * same strokes: round pen ends, the chosen colour and width.
+     */
+    private fun inkAppearance(doc: PDDocument, m: Mark, geo: PageGeometry): PDAppearanceDictionary {
+        val rect = pdfRect(m, geo)
+        val stream = PDAppearanceStream(doc)
+        stream.bBox = rect
+        val c = rgb(m.color)
+        fun n(v: Float) = String.format(Locale.US, "%.3f", v)
+        val ops = StringBuilder()
+        ops.append("q ${n(c[0])} ${n(c[1])} ${n(c[2])} RG ${n(penPoints(m, geo))} w 1 J 1 j\n")
+        m.ink.forEach { stroke ->
+            if (stroke.size < 2) return@forEach
+            val (x0, y0) = geo.toPdf(stroke[0], stroke[1])
+            ops.append("${n(x0)} ${n(y0)} m\n")
+            if (stroke.size == 2) {
+                // A dot: a tiny line so the round pen end shows
+                ops.append("${n(x0 + 0.01f)} ${n(y0)} l\n")
+            }
+            var i = 2
+            while (i + 1 < stroke.size) {
+                val (x, y) = geo.toPdf(stroke[i], stroke[i + 1])
+                ops.append("${n(x)} ${n(y)} l\n")
+                i += 2
+            }
+            ops.append("S\n")
+        }
+        ops.append("Q\n")
+        stream.cosObject.createOutputStream().use { it.write(ops.toString().toByteArray(Charsets.US_ASCII)) }
+        return PDAppearanceDictionary().apply { setNormalAppearance(stream) }
     }
 }
