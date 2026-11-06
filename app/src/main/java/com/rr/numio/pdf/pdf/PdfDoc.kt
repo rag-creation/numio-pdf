@@ -7,6 +7,7 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.LruCache
+import com.rr.numio.pdf.text.TextExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -29,6 +30,8 @@ class PdfDoc private constructor(
     private val fd: ParcelFileDescriptor,
     private val renderer: PdfRenderer,
     val pages: List<PageSize>,
+    /** Where the words are on each page, for selecting and copying text. */
+    val text: TextExtractor,
 ) {
     val pageCount: Int get() = pages.size
 
@@ -73,6 +76,7 @@ class PdfDoc private constructor(
                     runCatching { renderer.close() }
                     runCatching { fd.close() }
                 }
+                text.close()
             }
         }
     }
@@ -144,7 +148,7 @@ class PdfDoc private constructor(
                 runCatching { fd.close() }
                 throw OpenFailure("This PDF has no pages.")
             }
-            return PdfDoc(fd, renderer, pages)
+            return PdfDoc(fd, renderer, pages, TextExtractor(context.applicationContext, uri))
         }
 
         /** One working copy at a time; the last one is replaced. */

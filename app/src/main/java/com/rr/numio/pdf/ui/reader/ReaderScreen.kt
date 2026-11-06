@@ -1,6 +1,12 @@
 package com.rr.numio.pdf.ui.reader
 
 import android.graphics.Bitmap
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.rr.numio.pdf.text.NBox
+import com.rr.numio.pdf.text.Selection
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -113,6 +119,39 @@ fun ReaderScreen(
     val scope = rememberCoroutineScope()
     var chrome by remember { mutableStateOf(true) }
     var askPage by remember { mutableStateOf(false) }
+    var selection by remember { mutableStateOf<Selection?>(null) }
+    var findingText by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+
+    // Long-press: find the text on that page (read once, then kept) and select the word
+    fun longPress(hit: PageHit) {
+        scope.launch {
+            val slow = launch {
+                delay(250)
+                findingText = true
+            }
+            val text = doc.text.page(hit.page)
+            slow.cancel()
+            findingText = false
+            if (text.isEmpty) {
+                Toast.makeText(context, "No text to select on this page. It may be a scanned image.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val i = text.hit(hit.x, hit.y) ?: return@launch
+            val word = text.wordAt(i)
+            selection = Selection(hit.page, text, word.first, word.last)
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+    }
+
+    fun dragHandle(start: Boolean, hit: PageHit) {
+        val s = selection ?: return
+        if (hit.page != s.page) return
+        val i = s.text.nearest(hit.x, hit.y) ?: return
+        val next = if (start) s.copy(start = i) else s.copy(end = i)
+        if (next != s) selection = next
+    }
 
     // After a jump (thumbnail or Go to page) that page is current until you scroll,
     // even if it is too short to reach the middle of the screen.
@@ -158,7 +197,14 @@ fun ReaderScreen(
     }
 
     Box(Modifier.fillMaxSize().background(Numio.Bg)) {
-        Pages(doc, listState, onTap = { chrome = !chrome })
+        Pages(
+            doc = doc,
+            listState = listState,
+            selection = selection,
+            onTap = { if (selection != null) selection = null else chrome = !chrome },
+            onLongPress = ::longPress,
+            onDragHandle = ::dragHandle,
+        )
 
         AnimatedVisibility(
             visible = chrome,
@@ -190,7 +236,42 @@ fun ReaderScreen(
         }
 
         AnimatedVisibility(
-            visible = chrome,
+            visible = selection != null,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            SelectionBar(
+                onCopy = {
+                    selection?.let { copyText(context, it.string) }
+                    selection = null
+                },
+                onShare = {
+                    selection?.let { shareText(context, it.string) }
+                },
+                onSelectPage = {
+                    selection = selection?.let { it.copy(start = it.text.firstIndex, end = it.text.lastIndex) }
+                },
+                onClose = { selection = null },
+            )
+        }
+
+        if (findingText) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 96.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Numio.SurfaceHigh)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Text("Finding text\u2026", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+
+        AnimatedVisibility(
+            visible = chrome && selection == null,
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -222,7 +303,14 @@ fun ReaderScreen(
  * finger moves the page by the same distance on screen at any zoom.
  */
 @Composable
-private fun Pages(doc: PdfDoc, listState: LazyListState, onTap: () -> Unit) {
+private fun Pages(
+    doc: PdfDoc,
+    listState: LazyListState,
+    selection: Selection?,
+    onTap: () -> Unit,
+    onLongPress: (PageHit) -> Unit,
+    onDragHandle: (start: Boolean, hit: PageHit) -> Unit,
+) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offX by remember { mutableFloatStateOf(0f) }
     var offY by remember { mutableFloatStateOf(0f) }
@@ -231,6 +319,9 @@ private fun Pages(doc: PdfDoc, listState: LazyListState, onTap: () -> Unit) {
     val scope = rememberCoroutineScope()
     val fling = ScrollableDefaults.flingBehavior()
     val tap by rememberUpdatedState(onTap)
+    val longPress by rememberUpdatedState(onLongPress)
+    val dragHandle by rememberUpdatedState(onDragHandle)
+    val currentSelection by rememberUpdatedState(selection)
     val density = LocalDensity.current
 
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
@@ -265,29 +356,82 @@ private fun Pages(doc: PdfDoc, listState: LazyListState, onTap: () -> Unit) {
 
         val taps = remember { TapMemory() }
 
+        // Where a finger is: which page, and where on it as fractions of the page.
+        // [page] given: measure against that page even if the finger is off it.
+        fun locate(pos: Offset, w: Float, page: Int? = null): PageHit? {
+            val lx = (pos.x - offX) / scale
+            val ly = (pos.y - offY) / scale
+            val info = listState.layoutInfo
+            val item = info.visibleItemsInfo.firstOrNull { item ->
+                val top = item.offset - info.viewportStartOffset
+                if (page != null) item.index == page else ly >= top && ly <= top + item.size
+            } ?: return null
+            val top = item.offset - info.viewportStartOffset
+            val left = (w - baseWidthPx) / 2f
+            return PageHit(item.index, (lx - left) / baseWidthPx, (ly - top) / item.size.coerceAtLeast(1))
+        }
+
+        // Where the two selection handles are on screen
+        fun handles(sel: Selection, w: Float): Pair<Offset, Offset>? {
+            val info = listState.layoutInfo
+            val item = info.visibleItemsInfo.firstOrNull { it.index == sel.page } ?: return null
+            val boxes = sel.boxes
+            if (boxes.isEmpty()) return null
+            val top = item.offset - info.viewportStartOffset
+            val left = (w - baseWidthPx) / 2f
+            fun screen(nx: Float, ny: Float) =
+                Offset(offX + scale * (left + nx * baseWidthPx), offY + scale * (top + ny * item.size))
+            return screen(boxes.first().left, boxes.first().bottom) to screen(boxes.last().right, boxes.last().bottom)
+        }
+
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
+                .pointerInput(baseWidthPx) {
                     val slop = viewConfiguration.touchSlop
+                    val longPressMs = viewConfiguration.longPressTimeoutMillis
+                    val grab = 36.dp.toPx()
                     awaitEachGesture {
                         val w = size.width.toFloat()
                         val h = size.height.toFloat()
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+
+                        // Grabbing a selection handle: drag it, nothing else
+                        val sel = currentSelection
+                        val ends = sel?.let { handles(it, w) }
+                        val grabbed = when {
+                            ends == null -> null
+                            (down.position - ends.second).getDistance() <= grab -> false
+                            (down.position - ends.first).getDistance() <= grab -> true
+                            else -> null
+                        }
+                        if (sel != null && grabbed != null) {
+                            down.consume()
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                locate(change.position, w, sel.page)?.let { dragHandle(grabbed, it) }
+                                event.changes.forEach { it.consume() }
+                            }
+                            return@awaitEachGesture
+                        }
+
                         if (zoomed) scope.launch { listState.stopScroll() }
                         val tracker = VelocityTracker()
                         tracker.addPosition(down.uptimeMillis, down.position)
                         var multi = false
                         var moved = false
+                        var released = false
                         var travel = Offset.Zero
                         var upAt = down.uptimeMillis
 
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                        // One step of pan / zoom. False once every finger is up.
+                        fun step(event: androidx.compose.ui.input.pointer.PointerEvent): Boolean {
                             val pressed = event.changes.filter { it.pressed }
                             if (pressed.isEmpty()) {
                                 upAt = event.changes.firstOrNull()?.uptimeMillis ?: upAt
-                                break
+                                return false
                             }
                             if (pressed.size >= 2) multi = true
                             val pan = event.calculatePan()
@@ -316,6 +460,37 @@ private fun Pages(doc: PdfDoc, listState: LazyListState, onTap: () -> Unit) {
                                 event.changes.forEach { if (it.positionChanged()) it.consume() }
                             }
                             if (!multi) pressed.first().let { tracker.addPosition(it.uptimeMillis, it.position) }
+                            return true
+                        }
+
+                        // Wait to see if this becomes a long-press
+                        val timedOut = withTimeoutOrNull(longPressMs) {
+                            while (true) {
+                                if (!step(awaitPointerEvent(PointerEventPass.Initial))) {
+                                    released = true
+                                    break
+                                }
+                                if (moved || multi) break
+                            }
+                            false
+                        } ?: true
+
+                        if (timedOut && !moved && !multi && !released) {
+                            // Long-press: select the word, then keep dragging to select more
+                            val hit = locate(down.position, w)
+                            if (hit != null) longPress(hit)
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                if (hit != null) locate(change.position, w, hit.page)?.let { dragHandle(false, it) }
+                                event.changes.forEach { it.consume() }
+                            }
+                            return@awaitEachGesture
+                        }
+
+                        if (!released) {
+                            while (step(awaitPointerEvent(PointerEventPass.Initial))) Unit
                         }
 
                         when {
@@ -366,7 +541,11 @@ private fun Pages(doc: PdfDoc, listState: LazyListState, onTap: () -> Unit) {
                     },
             ) {
                 items(doc.pageCount, key = { it }) { index ->
-                    PageView(doc, index, pageWidth, baseWidthPx, renderWidth)
+                    PageView(
+                        doc, index, pageWidth, baseWidthPx, renderWidth,
+                        selected = selection?.takeIf { it.page == index }?.boxes,
+                        scale = { scale },
+                    )
                 }
             }
         }
@@ -374,7 +553,15 @@ private fun Pages(doc: PdfDoc, listState: LazyListState, onTap: () -> Unit) {
 }
 
 @Composable
-private fun PageView(doc: PdfDoc, index: Int, width: Dp, baseWidthPx: Int, renderWidthPx: Int) {
+private fun PageView(
+    doc: PdfDoc,
+    index: Int,
+    width: Dp,
+    baseWidthPx: Int,
+    renderWidthPx: Int,
+    selected: List<NBox>?,
+    scale: () -> Float,
+) {
     val aspect = doc.pages[index].aspect
     val bitmap by produceState(
         initialValue = doc.cached(index, renderWidthPx) ?: doc.cached(index, baseWidthPx),
@@ -401,6 +588,7 @@ private fun PageView(doc: PdfDoc, index: Int, width: Dp, baseWidthPx: Int, rende
         } else {
             Text("${index + 1}", style = MaterialTheme.typography.bodySmall, color = Numio.Line)
         }
+        if (!selected.isNullOrEmpty()) SelectionOverlay(selected, scale)
     }
 }
 
