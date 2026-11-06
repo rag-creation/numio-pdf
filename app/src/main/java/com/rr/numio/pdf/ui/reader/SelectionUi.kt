@@ -154,7 +154,7 @@ fun SelectionBar(
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             MarkColors.all.forEach { c ->
                 val selected = c == color
@@ -165,6 +165,7 @@ fun SelectionBar(
                         .padding(if (selected) 4.dp else 2.dp)
                         .clip(CircleShape)
                         .background(Color(0xFF000000.toInt() or c))
+                        .border(1.dp, Numio.Line, CircleShape)
                         .clickable(onClickLabel = MarkColors.name(c), role = Role.RadioButton) { onColor(c) },
                 )
             }
@@ -178,7 +179,10 @@ fun SelectionBar(
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BarAction(PIcons.Highlight, "Highlight", onHighlight, highlight = true)
+            BarAction(
+                PIcons.Highlight, "Highlight", onHighlight,
+                highlight = true, enabled = MarkColors.canHighlight(color),
+            )
             BarAction(PIcons.Underline, "Underline", onUnderline)
             BarAction(PIcons.Copy, "Copy", onCopy)
             BarAction(PIcons.Share, "Share", onShare)
@@ -221,19 +225,20 @@ fun MarkBar(
             }
         }
         Row(
-            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, bottom = 4.dp),
+            Modifier.fillMaxWidth().padding(start = 10.dp, end = 2.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            MarkColors.all.forEach { c ->
+            MarkColors.all.filter { mark.kind != MarkKind.HIGHLIGHT || MarkColors.canHighlight(it) }.forEach { c ->
                 val selected = c == mark.color
                 Box(
                     Modifier
-                        .size(30.dp)
+                        .size(28.dp)
                         .then(if (selected) Modifier.border(2.dp, Numio.Text, CircleShape) else Modifier)
                         .padding(if (selected) 4.dp else 2.dp)
                         .clip(CircleShape)
                         .background(Color(0xFF000000.toInt() or c))
+                        .border(1.dp, Numio.Line, CircleShape)
                         .clickable(onClickLabel = MarkColors.name(c), role = Role.RadioButton) { onColor(c) },
                 )
             }
@@ -251,8 +256,10 @@ private fun BarAction(
     onClick: () -> Unit,
     highlight: Boolean = false,
     danger: Boolean = false,
+    enabled: Boolean = true,
 ) {
     val tint = when {
+        !enabled -> Numio.Line
         danger -> Numio.Error
         highlight -> Numio.Amber
         else -> Numio.Text
@@ -260,7 +267,7 @@ private fun BarAction(
     Column(
         Modifier
             .clip(RoundedCornerShape(18.dp))
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp),
