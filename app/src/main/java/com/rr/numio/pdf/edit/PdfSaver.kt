@@ -18,6 +18,9 @@ import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSFloat
 import com.tom_roush.pdfbox.cos.COSName
 import com.rr.numio.pdf.text.PageGeometry
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDButton
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDChoice
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTextField
 import java.util.Locale
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -108,6 +111,7 @@ object PdfSaver {
                         }
                         page.annotations = annotations
                     }
+                    if (plan.fills.isNotEmpty()) fill(it, plan.fills)
                     it.save(temp)
                 }
             }
@@ -134,6 +138,30 @@ object PdfSaver {
             temp.delete()
         }
         missed
+    }
+
+    /**
+     * Writes form values into the form's own fields, so any PDF app (or the
+     * office that receives the form) reads them. PdfBox draws each field's
+     * look; when it can't (letters its fonts lack, like Malayalam), the value
+     * is still saved and PDF apps are asked to draw it themselves.
+     */
+    private fun fill(doc: PDDocument, fills: Map<String, String>) {
+        val form = doc.documentCatalog.acroForm ?: return
+        fills.forEach { (name, value) ->
+            val field = form.getField(name) ?: return@forEach
+            try {
+                when (field) {
+                    is PDButton -> field.setValue(value)
+                    is PDChoice -> field.setValue(value)
+                    is PDTextField -> field.setValue(value)
+                    else -> Unit
+                }
+            } catch (e: Exception) {
+                field.cosObject.setString(COSName.V, value)
+                form.needAppearances = true
+            }
+        }
     }
 
     /** Only marks PDF Reader shows and edits are ever changed or removed. */

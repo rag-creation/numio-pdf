@@ -82,6 +82,7 @@ fun PdfApp(
                     onRemoveMark = vm::removeMark,
                     onRecolorMark = vm::recolorMark,
                     onChangeMark = vm::changeMark,
+                    onFill = vm::fill,
                     onUndo = vm::undoMark,
                     onSave = { page -> save(page, r.name) },
                 )
@@ -93,8 +94,8 @@ fun PdfApp(
                         title = { Text("Save your changes?", style = MaterialTheme.typography.titleLarge) },
                         text = {
                             Text(
-                                if (n == 1) "1 change to your marks isn't saved in the PDF yet."
-                                else "$n changes to your marks aren't saved in the PDF yet.",
+                                if (n == 1) "1 change isn't saved in the PDF yet."
+                                else "$n changes aren't saved in the PDF yet.",
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = Numio.TextDim,
                             )

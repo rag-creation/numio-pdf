@@ -15,6 +15,15 @@ import com.tom_roush.pdfbox.cos.COSNumber
 import com.rr.numio.pdf.edit.Ink
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotation
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationTextMarkup
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDChoice
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDRadioButton
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTerminalField
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTextField
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDVariableText
+import com.rr.numio.pdf.form.FieldKind
+import com.rr.numio.pdf.form.FormField
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +51,18 @@ class TextExtractor(private val context: Context, private val source: Uri) {
     suspend fun page(index: Int): PageText = lock.withLock {
         pages[index] ?: withContext(Dispatchers.IO) { extract(index) }.also { pages[index] = it }
     }
+
+    // Form fields, read once for the whole document
+    private var fieldsByPage: Map<Int, List<FormField>>? = null
+
+    /** The fillable form boxes on a page (none for most PDFs). */
+    suspend fun fields(index: Int): List<FormField> = lock.withLock {
+        val all = fieldsByPage ?: withContext(Dispatchers.IO) { readFields() }.also { fieldsByPage = it }
+        all[index] ?: emptyList()
+    }
+
+    /** Form boxes of a page if already read, without waiting. */
+    fun cachedFields(index: Int): List<FormField> = fieldsByPage?.get(index) ?: emptyList()
 
     /** Saved marks of a page if already read, without waiting. */
     fun cachedMarks(index: Int): List<Mark> = marks[index] ?: emptyList()
@@ -228,6 +249,69 @@ class TextExtractor(private val context: Context, private val source: Uri) {
         val box = NBox(r.left, r.top, r.left + Mark.NOTE_SIZE, r.top + Mark.NOTE_SIZE / aspect)
         val color = runCatching { a.color?.toRGB() }.getOrNull() ?: 0xFFD43B
         return Mark(page, MarkKind.NOTE, listOf(box), color and 0xFFFFFF, a.contents ?: "", Mark.savedId(page, ref), ref)
+    }
+
+    private fun readFields(): Map<Int, List<FormField>> {
+        val d = load() ?: return emptyMap()
+        return try {
+            val form = d.documentCatalog.acroForm ?: return emptyMap()
+            // Which field each box belongs to
+            val owner = HashMap<COSDictionary, PDTerminalField>()
+            for (f in form.fieldTree) {
+                if (f is PDTerminalField) f.widgets.forEach { w -> owner[w.cosObject] = f }
+            }
+            if (owner.isEmpty()) return emptyMap()
+            val out = HashMap<Int, MutableList<FormField>>()
+            d.pages.forEachIndexed { index, page ->
+                val geo = geometry(page)
+                val shownW = geo.shownWidth
+                page.annotations.forEach { a ->
+                    val w = a as? PDAnnotationWidget ?: return@forEach
+                    val f = owner[w.cosObject] ?: return@forEach
+                    val r = w.rectangle ?: return@forEach
+                    val box = geo.boxAround(
+                        floatArrayOf(r.lowerLeftX, r.upperRightY, r.upperRightX, r.upperRightY, r.lowerLeftX, r.lowerLeftY, r.upperRightX, r.lowerLeftY),
+                    )
+                    if (box.width() <= 0f || box.height() <= 0f) return@forEach
+                    val kind = when (f) {
+                        is PDTextField -> FieldKind.TEXT
+                        is PDCheckBox -> FieldKind.CHECK
+                        is PDRadioButton -> FieldKind.RADIO
+                        is PDChoice -> FieldKind.CHOICE
+                        else -> return@forEach // push buttons and signatures aren't filled here
+                    }
+                    // The name this box stands for when ticked: its appearance other than "Off"
+                    val onValue = runCatching {
+                        w.appearance?.normalAppearance?.subDictionary?.keys?.map { it.name }?.firstOrNull { it != "Off" }
+                    }.getOrNull() ?: ""
+                    val da = (f as? PDVariableText)?.defaultAppearance ?: ""
+                    val points = Regex("""([0-9.]+)\s+Tf""").find(da)?.groupValues?.get(1)?.toFloatOrNull() ?: 0f
+                    val value = when (kind) {
+                        // A ticked box's value is its appearance state; that's what's drawn
+                        FieldKind.CHECK, FieldKind.RADIO ->
+                            w.appearanceState?.name?.takeIf { it != "Off" } ?: f.valueAsString.takeIf { it == onValue } ?: "Off"
+                        else -> f.valueAsString ?: ""
+                    }
+                    out.getOrPut(index) { ArrayList() } += FormField(
+                        name = f.fullyQualifiedName ?: return@forEach,
+                        label = f.alternateFieldName?.takeIf { it.isNotBlank() } ?: f.partialName ?: "Field",
+                        kind = kind,
+                        page = index,
+                        box = box,
+                        value = value,
+                        onValue = onValue,
+                        options = (f as? PDChoice)?.optionsDisplayValues ?: emptyList(),
+                        multiline = (f as? PDTextField)?.isMultiline == true,
+                        readOnly = f.isReadOnly,
+                        fontSize = if (points > 0f) points / shownW else 0f,
+                        maxLength = (f as? PDTextField)?.maxLen?.coerceAtLeast(0) ?: 0,
+                    )
+                }
+            }
+            out
+        } catch (e: Throwable) {
+            emptyMap()
+        }
     }
 
     companion object {

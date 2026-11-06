@@ -8,6 +8,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import com.rr.numio.pdf.text.NBox
 import com.rr.numio.pdf.edit.Edit
 import com.rr.numio.pdf.edit.ColorSample
+import com.rr.numio.pdf.form.FieldKind
+import com.rr.numio.pdf.form.FormField
 import com.rr.numio.pdf.edit.Edits
 import com.rr.numio.pdf.edit.Ink
 import com.rr.numio.pdf.edit.TextBox
@@ -128,6 +130,7 @@ fun ReaderScreen(
     onRemoveMark: (Mark) -> Unit,
     onRecolorMark: (Mark, Int) -> Unit,
     onChangeMark: (old: Mark, new: Mark) -> Unit,
+    onFill: (field: String, value: String) -> Unit,
     onUndo: () -> Unit,
     onSave: (page: Int) -> Unit,
 ) {
@@ -148,6 +151,18 @@ fun ReaderScreen(
     var noteColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
     // A text box or note being dragged or pinched, shown in place of the saved one
     var preview by remember { mutableStateOf<Mark?>(null) }
+    // A text or choice form field being filled
+    var fillingField by remember { mutableStateOf<FormField?>(null) }
+
+    /** A field's value as saved in the file (for radio groups, the ticked box anywhere in the form). */
+    fun currentValue(field: FormField): String {
+        if (field.kind != FieldKind.RADIO && field.kind != FieldKind.CHECK) return field.value
+        return (0 until doc.pageCount).asSequence()
+            .flatMap { doc.text.cachedFields(it).asSequence() }
+            .filter { it.name == field.name }
+            .map { it.value }
+            .firstOrNull { it != "Off" } ?: "Off"
+    }
     // Selected text waiting for its replacement words
     var replacing by remember { mutableStateOf<Selection?>(null) }
 
@@ -213,7 +228,21 @@ fun ReaderScreen(
                 val mark = hit?.let { h ->
                     Edits.apply(doc.text.cachedMarks(h.page), edits, h.page).lastOrNull { it.contains(h.x, h.y) }
                 }
-                if (mark == null) chrome = !chrome else editingRef = mark.page to mark.id
+                // A form box under the finger: tick it, or open it for typing / choosing
+                val field = if (mark == null && hit != null) {
+                    doc.text.cachedFields(hit.page).lastOrNull { !it.readOnly && it.contains(hit.x, hit.y) }
+                } else {
+                    null
+                }
+                when {
+                    mark != null -> editingRef = mark.page to mark.id
+                    field == null -> chrome = !chrome
+                    field.kind == FieldKind.CHECK || field.kind == FieldKind.RADIO -> {
+                        val now = Edits.fills(edits)[field.name] ?: currentValue(field)
+                        onFill(field.name, FormField.tapped(field, now))
+                    }
+                    else -> fillingField = field
+                }
             }
         }
     }
@@ -603,6 +632,19 @@ fun ReaderScreen(
         )
     } }
 
+    fillingField?.let { f -> key(f) {
+        val now = Edits.fills(edits)[f.name] ?: f.value
+        val done: (String) -> Unit = { v ->
+            if (v != now) onFill(f.name, v)
+            fillingField = null
+        }
+        if (f.kind == FieldKind.CHOICE && f.options.isNotEmpty()) {
+            FieldChoiceDialog(f, now, onDone = done, onDismiss = { fillingField = null })
+        } else {
+            FieldTextDialog(f, now, onDone = done, onDismiss = { fillingField = null })
+        }
+    } }
+
     if (askPage) {
         GoToPageDialog(
             count = count,
@@ -925,6 +967,7 @@ private fun Pages(
                     }
                 },
         ) {
+            val fills = Edits.fills(edits)
             LazyColumn(
                 state = listState,
                 userScrollEnabled = !zoomed,
@@ -946,6 +989,7 @@ private fun Pages(
                         doc, index, pageWidth, baseWidthPx, renderWidth,
                         selected = selection?.takeIf { it.page == index }?.boxes,
                         edits = edits,
+                        fills = fills,
                         focused = focused,
                         preview = preview?.takeIf { it.page == index },
                         live = live?.takeIf { it.page == index },
@@ -966,6 +1010,7 @@ private fun PageView(
     renderWidthPx: Int,
     selected: List<NBox>?,
     edits: List<Edit>,
+    fills: Map<String, String>,
     focused: Long?,
     preview: Mark?,
     live: LiveStroke?,
@@ -973,6 +1018,8 @@ private fun PageView(
 ) {
     // Marks already saved in the file: Android's renderer doesn't draw them, so we do
     val saved by produceState(emptyList<Mark>(), index, doc) { value = doc.text.marks(index) }
+    // Fillable form boxes, also left out by Android's renderer
+    val fields by produceState(emptyList<FormField>(), index, doc) { value = doc.text.fields(index) }
     val aspect = doc.pages[index].aspect
     val bitmap by produceState(
         initialValue = doc.cached(index, renderWidthPx) ?: doc.cached(index, baseWidthPx),
@@ -999,6 +1046,7 @@ private fun PageView(
         } else {
             Text("${index + 1}", style = MaterialTheme.typography.bodySmall, color = Numio.Line)
         }
+        if (fields.isNotEmpty()) FormOverlay(fields, fills)
         val applied = Edits.apply(saved, edits, index)
         val marks = if (preview == null) applied else applied.map { if (it.id == preview.id) preview else it }
         if (marks.isNotEmpty()) MarksOverlay(marks, focused, scale)

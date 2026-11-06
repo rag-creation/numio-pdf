@@ -105,6 +105,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         edits.add(Edit.Change(old, new))
     }
 
+    /** A form field filled in (text, chosen option, or a box ticked / "Off"). */
+    fun fill(field: String, value: String) {
+        edits.add(Edit.Fill(field, value))
+    }
+
     fun undoMark() {
         if (edits.isNotEmpty()) edits.removeAt(edits.lastIndex)
     }
