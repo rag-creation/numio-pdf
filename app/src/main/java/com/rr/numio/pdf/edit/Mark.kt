@@ -9,6 +9,12 @@ enum class MarkKind {
     TEXT,
     /** A sticky note: a small icon that opens to show what was written. */
     NOTE,
+    /**
+     * Text on the page itself changed: the letters under [Mark.boxes] are taken
+     * out of the page and [Mark.text] is written in their place (nothing written
+     * when empty, which removes the text for good). Not an annotation.
+     */
+    REPLACE,
 }
 
 /**

@@ -62,6 +62,20 @@ object PdfSaver {
                         if (index !in 0 until it.numberOfPages) continue
                         val page = it.getPage(index)
                         val geo = TextExtractor.geometry(page)
+                        // Text on the page itself first, then the marks on top
+                        val replace = plan.added.filter { m -> m.page == index && m.kind == MarkKind.REPLACE }
+                        if (replace.isNotEmpty()) {
+                            val found = try {
+                                TextReplacer.apply(it, page, geo, replace)
+                            } catch (e: Exception) {
+                                throw SaveFailure("This page's text couldn't be changed, so nothing was saved.")
+                            }
+                            if (found < replace.size) {
+                                throw SaveFailure(
+                                    "Some of the text to change couldn't be found in the page (it may be part of an image), so nothing was saved.",
+                                )
+                            }
+                        }
                         val annotations: MutableList<PDAnnotation> = page.annotations
 
                         // New colours for marks already in the file
@@ -80,7 +94,7 @@ object PdfSaver {
                         plan.removed.filter { m -> m.page == index }.map { m -> m.ref }.sortedDescending().forEach { ref ->
                             if (annotations.getOrNull(ref)?.let(::editable) == true) annotations.removeAt(ref)
                         }
-                        plan.added.filter { m -> m.page == index }.forEach { m ->
+                        plan.added.filter { m -> m.page == index && m.kind != MarkKind.REPLACE }.forEach { m ->
                             annotations.add(
                                 when (m.kind) {
                                     MarkKind.INK -> ink(it, m, geo)
@@ -135,7 +149,7 @@ object PdfSaver {
             MarkKind.HIGHLIGHT -> PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT
             MarkKind.UNDERLINE -> PDAnnotationTextMarkup.SUB_TYPE_UNDERLINE
             MarkKind.STRIKEOUT -> PDAnnotationTextMarkup.SUB_TYPE_STRIKEOUT
-            MarkKind.INK, MarkKind.TEXT, MarkKind.NOTE -> error("saved by their own functions")
+            MarkKind.INK, MarkKind.TEXT, MarkKind.NOTE, MarkKind.REPLACE -> error("saved by their own functions")
         }
         val quads = FloatArray(m.boxes.size * 8)
         var minX = Float.MAX_VALUE
