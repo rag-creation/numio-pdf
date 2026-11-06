@@ -32,6 +32,8 @@ class PdfDoc private constructor(
     val pages: List<PageSize>,
     /** Where the words are on each page, for selecting and copying text. */
     val text: TextExtractor,
+    /** What was actually opened: the file itself, or the app's working copy of it. */
+    val source: Uri,
 ) {
     val pageCount: Int get() = pages.size
 
@@ -148,7 +150,7 @@ class PdfDoc private constructor(
                 runCatching { fd.close() }
                 throw OpenFailure("This PDF has no pages.")
             }
-            return PdfDoc(fd, renderer, pages, TextExtractor(context.applicationContext, uri))
+            return PdfDoc(fd, renderer, pages, TextExtractor(context.applicationContext, uri), uri)
         }
 
         /** One working copy at a time; the last one is replaced. */

@@ -6,6 +6,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.rr.numio.pdf.text.NBox
+import com.rr.numio.pdf.edit.Mark
+import com.rr.numio.pdf.edit.MarkColors
+import com.rr.numio.pdf.edit.MarkKind
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.rr.numio.pdf.text.Selection
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
@@ -108,10 +113,14 @@ private val PAGE_SIDE = 8.dp
 fun ReaderScreen(
     state: ReaderState.Open,
     starred: Boolean,
+    pending: List<Mark>,
     onBack: () -> Unit,
     onStar: () -> Unit,
     onShare: () -> Unit,
     onPageChanged: (Int) -> Unit,
+    onMark: (Mark) -> Unit,
+    onUndo: () -> Unit,
+    onSave: (page: Int) -> Unit,
 ) {
     val doc = state.doc
     val count = doc.pageCount
@@ -120,6 +129,7 @@ fun ReaderScreen(
     var chrome by remember { mutableStateOf(true) }
     var askPage by remember { mutableStateOf(false) }
     var selection by remember { mutableStateOf<Selection?>(null) }
+    var markColor by rememberSaveable { mutableIntStateOf(MarkColors.YELLOW) }
     var findingText by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -201,6 +211,7 @@ fun ReaderScreen(
             doc = doc,
             listState = listState,
             selection = selection,
+            pending = pending,
             onTap = { if (selection != null) selection = null else chrome = !chrome },
             onLongPress = ::longPress,
             onDragHandle = ::dragHandle,
@@ -212,7 +223,17 @@ fun ReaderScreen(
             exit = fadeOut() + slideOutVertically { -it },
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
-            TopBar(state.name, current, count, starred, onBack, onStar)
+            TopBar(
+                name = state.name,
+                current = current,
+                count = count,
+                starred = starred,
+                unsaved = pending.size,
+                onBack = onBack,
+                onStar = onStar,
+                onUndo = onUndo,
+                onSave = { onSave(current) },
+            )
         }
 
         AnimatedVisibility(
@@ -241,7 +262,16 @@ fun ReaderScreen(
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
+            fun mark(kind: MarkKind) {
+                val sel = selection ?: return
+                onMark(Mark(sel.page, kind, sel.boxes, markColor, sel.string))
+                selection = null
+            }
             SelectionBar(
+                color = markColor,
+                onColor = { markColor = it },
+                onHighlight = { mark(MarkKind.HIGHLIGHT) },
+                onUnderline = { mark(MarkKind.UNDERLINE) },
                 onCopy = {
                     selection?.let { copyText(context, it.string) }
                     selection = null
@@ -307,6 +337,7 @@ private fun Pages(
     doc: PdfDoc,
     listState: LazyListState,
     selection: Selection?,
+    pending: List<Mark>,
     onTap: () -> Unit,
     onLongPress: (PageHit) -> Unit,
     onDragHandle: (start: Boolean, hit: PageHit) -> Unit,
@@ -544,6 +575,7 @@ private fun Pages(
                     PageView(
                         doc, index, pageWidth, baseWidthPx, renderWidth,
                         selected = selection?.takeIf { it.page == index }?.boxes,
+                        pending = pending.filter { it.page == index },
                         scale = { scale },
                     )
                 }
@@ -560,8 +592,11 @@ private fun PageView(
     baseWidthPx: Int,
     renderWidthPx: Int,
     selected: List<NBox>?,
+    pending: List<Mark>,
     scale: () -> Float,
 ) {
+    // Marks already saved in the file: Android's renderer doesn't draw them, so we do
+    val saved by produceState(emptyList<Mark>(), index, doc) { value = doc.text.marks(index) }
     val aspect = doc.pages[index].aspect
     val bitmap by produceState(
         initialValue = doc.cached(index, renderWidthPx) ?: doc.cached(index, baseWidthPx),
@@ -588,12 +623,23 @@ private fun PageView(
         } else {
             Text("${index + 1}", style = MaterialTheme.typography.bodySmall, color = Numio.Line)
         }
+        if (saved.isNotEmpty() || pending.isNotEmpty()) MarksOverlay(saved + pending)
         if (!selected.isNullOrEmpty()) SelectionOverlay(selected, scale)
     }
 }
 
 @Composable
-private fun TopBar(name: String, current: Int, count: Int, starred: Boolean, onBack: () -> Unit, onStar: () -> Unit) {
+private fun TopBar(
+    name: String,
+    current: Int,
+    count: Int,
+    starred: Boolean,
+    unsaved: Int,
+    onBack: () -> Unit,
+    onStar: () -> Unit,
+    onUndo: () -> Unit,
+    onSave: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -609,12 +655,28 @@ private fun TopBar(name: String, current: Int, count: Int, starred: Boolean, onB
             Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("Page ${current + 1} of $count", style = MaterialTheme.typography.bodySmall)
         }
-        IconButton(onClick = onStar) {
-            Icon(
-                if (starred) PIcons.StarFilled else PIcons.Star,
-                contentDescription = if (starred) "Remove star" else "Star",
-                tint = if (starred) Numio.Amber else Numio.Text,
-            )
+        if (unsaved > 0) {
+            IconButton(onClick = onUndo) {
+                Icon(PIcons.Undo, contentDescription = "Undo last mark", tint = Numio.Text)
+            }
+            Box(
+                Modifier
+                    .padding(horizontal = 4.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Numio.Amber)
+                    .clickable(onClickLabel = "Save marks into the PDF", role = Role.Button, onClick = onSave)
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+            ) {
+                Text("Save", style = MaterialTheme.typography.labelLarge, color = Numio.OnAmber)
+            }
+        } else {
+            IconButton(onClick = onStar) {
+                Icon(
+                    if (starred) PIcons.StarFilled else PIcons.Star,
+                    contentDescription = if (starred) "Remove star" else "Star",
+                    tint = if (starred) Numio.Amber else Numio.Text,
+                )
+            }
         }
     }
 }
