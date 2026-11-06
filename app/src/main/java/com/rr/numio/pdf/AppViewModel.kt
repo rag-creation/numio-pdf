@@ -145,11 +145,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val ctx = getApplication<Application>()
             open.doc.close()
             try {
-                PdfSaver.save(ctx, open.doc.source, dest, plan)
+                val missed = PdfSaver.save(ctx, open.doc.source, dest, plan)
                 edits.clear()
                 Thumbnails.forget(ctx, dest.toString())
                 load(dest, page)
-                notice = if (target == null) "Saved" else "Saved as a new PDF"
+                // Changes that couldn't be made stay on screen, to delete or try again
+                missed.forEach { m -> edits.add(Edit.Add(m)) }
+                val saved = if (target == null) "Saved" else "Saved as a new PDF"
+                notice = when (missed.size) {
+                    0 -> saved
+                    1 -> "$saved. 1 text change couldn't be made (the text may be part of an image). It's still shown, so you can delete it or try again."
+                    else -> "$saved. ${missed.size} text changes couldn't be made (the text may be part of an image). They're still shown, so you can delete them or try again."
+                }
             } catch (e: SaveFailure) {
                 notice = e.message
                 load(original, page) // the marks stay, so nothing is lost
