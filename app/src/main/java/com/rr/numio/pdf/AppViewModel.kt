@@ -98,6 +98,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (mark.color != color) edits.add(Edit.Recolor(mark, color))
     }
 
+    fun changeMark(old: Mark, new: Mark) {
+        edits.add(Edit.Change(old, new))
+    }
+
     fun undoMark() {
         if (edits.isNotEmpty()) edits.removeAt(edits.lastIndex)
     }

@@ -18,6 +18,10 @@ data class PageGeometry(
 
     /** Width of the page as shown, in points (height and width swap when turned sideways). */
     val shownWidth: Float get() = if (turn == 90 || turn == 270) h else w
+    val shownHeight: Float get() = if (turn == 90 || turn == 270) w else h
+
+    /** Quarter turns clockwise the page is shown at: 0, 90, 180 or 270. */
+    val turnDegrees: Int get() = turn
 
     /** Shown fractions (u across, v down) to PDF points. */
     fun toPdf(u: Float, v: Float): Pair<Float, Float> {

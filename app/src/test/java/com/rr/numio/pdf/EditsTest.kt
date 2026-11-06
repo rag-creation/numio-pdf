@@ -75,4 +75,33 @@ class EditsTest {
         assertTrue(m.contains(0.3f, 0.115f))
         assertTrue(!m.contains(0.8f, 0.5f))
     }
+
+    @Test
+    fun changingASavedTextBoxReplacesIt() {
+        val old = Mark(0, MarkKind.TEXT, box, 0x000000, "Hello", id = Mark.savedId(0, 4), ref = 4, fontSize = 0.02f)
+        val new = old.copy(text = "Hello there")
+        val edits = listOf(Edit.Change(old, new))
+        assertEquals("Hello there", Edits.apply(listOf(old), edits, 0).single().text)
+        val plan = Edits.plan(edits)
+        assertEquals(listOf(4), plan.removed.map { it.ref })
+        assertEquals("Hello there", plan.added.single().text)
+        assertEquals(-1, plan.added.single().ref)
+    }
+
+    @Test
+    fun changedThenDeletedSavedMarkIsJustRemoved() {
+        val old = Mark(0, MarkKind.NOTE, box, MarkColors.YELLOW, "Call HR", id = Mark.savedId(0, 1), ref = 1)
+        val changed = old.copy(text = "Call HR on Monday")
+        val plan = Edits.plan(listOf(Edit.Change(old, changed), Edit.Remove(changed)))
+        assertTrue(plan.added.isEmpty())
+        assertEquals(1, plan.removed.size)
+    }
+
+    @Test
+    fun changingANewNoteKeepsItNew() {
+        val note = Mark(0, MarkKind.NOTE, box, MarkColors.YELLOW, "a", id = -3)
+        val plan = Edits.plan(listOf(Edit.Add(note), Edit.Change(note, note.copy(text = "b"))))
+        assertEquals("b", plan.added.single().text)
+        assertTrue(plan.removed.isEmpty())
+    }
 }

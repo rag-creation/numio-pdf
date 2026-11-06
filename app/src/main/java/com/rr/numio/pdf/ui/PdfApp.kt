@@ -81,6 +81,7 @@ fun PdfApp(
                     onMark = vm::addMark,
                     onRemoveMark = vm::removeMark,
                     onRecolorMark = vm::recolorMark,
+                    onChangeMark = vm::changeMark,
                     onUndo = vm::undoMark,
                     onSave = { page -> save(page, r.name) },
                 )

@@ -133,7 +133,11 @@ class TextExtractor(private val context: Context, private val source: Uri) {
             val page = d.getPage(index)
             val geo = geometry(page)
             page.annotations.withIndex().mapNotNull { (ref, any) ->
-                if (any.subtype == "Ink") return@mapNotNull readInk(any, index, ref, geo)
+                when (any.subtype) {
+                    "Ink" -> return@mapNotNull readInk(any, index, ref, geo)
+                    "FreeText" -> return@mapNotNull readText(any, index, ref, geo)
+                    "Text" -> return@mapNotNull readNote(any, index, ref, geo)
+                }
                 val a = any as? PDAnnotationTextMarkup ?: return@mapNotNull null
                 val kind = when (a.subtype) {
                     PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT -> MarkKind.HIGHLIGHT
@@ -183,6 +187,41 @@ class TextExtractor(private val context: Context, private val source: Uri) {
             page, MarkKind.INK, listOf(Ink.bounds(strokes, width)), color and 0xFFFFFF, "",
             Mark.savedId(page, ref), ref, strokes, width,
         )
+    }
+
+    private fun rectBox(a: PDAnnotation, geo: PageGeometry): NBox? {
+        val r = a.rectangle ?: return null
+        return geo.boxAround(
+            floatArrayOf(r.lowerLeftX, r.upperRightY, r.upperRightX, r.upperRightY, r.lowerLeftX, r.lowerLeftY, r.upperRightX, r.lowerLeftY),
+        )
+    }
+
+    /** Typed text on the page. Its size and colour come from the /DA setting ("/Helv 12 Tf 0 0 0 rg"). */
+    private fun readText(a: PDAnnotation, page: Int, ref: Int, geo: PageGeometry): Mark? {
+        val box = rectBox(a, geo) ?: return null
+        val da = a.cosObject.getString(COSName.DA) ?: ""
+        val points = Regex("""([0-9.]+)\s+Tf""").find(da)?.groupValues?.get(1)?.toFloatOrNull()?.takeIf { it > 0f } ?: 12f
+        val rgb = Regex("""([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+rg""").find(da)?.groupValues
+        val gray = Regex("""([0-9.]+)\s+g(\s|$)""").find(da)?.groupValues?.get(1)?.toFloatOrNull()
+        fun c(v: Float) = (v.coerceIn(0f, 1f) * 255).toInt()
+        val color = when {
+            rgb != null -> (c(rgb[1].toFloat()) shl 16) or (c(rgb[2].toFloat()) shl 8) or c(rgb[3].toFloat())
+            gray != null -> (c(gray) shl 16) or (c(gray) shl 8) or c(gray)
+            else -> 0x000000
+        }
+        return Mark(
+            page, MarkKind.TEXT, listOf(box), color, a.contents ?: "",
+            Mark.savedId(page, ref), ref, fontSize = (points / geo.shownWidth).coerceIn(0.005f, 0.2f),
+        )
+    }
+
+    /** A sticky note: shown as PDF Reader's own note icon at the note's top-left corner. */
+    private fun readNote(a: PDAnnotation, page: Int, ref: Int, geo: PageGeometry): Mark? {
+        val r = rectBox(a, geo) ?: return null
+        val aspect = geo.shownHeight / geo.shownWidth
+        val box = NBox(r.left, r.top, r.left + Mark.NOTE_SIZE, r.top + Mark.NOTE_SIZE / aspect)
+        val color = runCatching { a.color?.toRGB() }.getOrNull() ?: 0xFFD43B
+        return Mark(page, MarkKind.NOTE, listOf(box), color and 0xFFFFFF, a.contents ?: "", Mark.savedId(page, ref), ref)
     }
 
     companion object {

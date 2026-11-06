@@ -19,6 +19,11 @@ import com.tom_roush.pdfbox.cos.COSFloat
 import com.tom_roush.pdfbox.cos.COSName
 import com.rr.numio.pdf.text.PageGeometry
 import java.util.Locale
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Matrix
+import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import java.io.File
 import java.util.Calendar
 import kotlinx.coroutines.Dispatchers
@@ -76,7 +81,14 @@ object PdfSaver {
                             if (annotations.getOrNull(ref)?.let(::editable) == true) annotations.removeAt(ref)
                         }
                         plan.added.filter { m -> m.page == index }.forEach { m ->
-                            annotations.add(if (m.kind == MarkKind.INK) ink(it, m, geo) else annotation(m, geo))
+                            annotations.add(
+                                when (m.kind) {
+                                    MarkKind.INK -> ink(it, m, geo)
+                                    MarkKind.TEXT -> freeText(it, m, geo)
+                                    MarkKind.NOTE -> note(it, m, geo)
+                                    else -> annotation(m, geo)
+                                },
+                            )
                         }
                         page.annotations = annotations
                     }
@@ -108,7 +120,7 @@ object PdfSaver {
     }
 
     /** Only marks PDF Reader shows and edits are ever changed or removed. */
-    private val editableTypes = setOf("Highlight", "Underline", "StrikeOut", "Squiggly", "Ink")
+    private val editableTypes = setOf("Highlight", "Underline", "StrikeOut", "Squiggly", "Ink", "FreeText", "Text")
 
     private fun editable(a: PDAnnotation): Boolean = a.subtype in editableTypes
 
@@ -123,7 +135,7 @@ object PdfSaver {
             MarkKind.HIGHLIGHT -> PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT
             MarkKind.UNDERLINE -> PDAnnotationTextMarkup.SUB_TYPE_UNDERLINE
             MarkKind.STRIKEOUT -> PDAnnotationTextMarkup.SUB_TYPE_STRIKEOUT
-            MarkKind.INK -> error("ink is saved by ink()")
+            MarkKind.INK, MarkKind.TEXT, MarkKind.NOTE -> error("saved by their own functions")
         }
         val quads = FloatArray(m.boxes.size * 8)
         var minX = Float.MAX_VALUE
@@ -203,7 +215,6 @@ object PdfSaver {
         val stream = PDAppearanceStream(doc)
         stream.bBox = rect
         val c = rgb(m.color)
-        fun n(v: Float) = String.format(Locale.US, "%.3f", v)
         val ops = StringBuilder()
         ops.append("q ${n(c[0])} ${n(c[1])} ${n(c[2])} RG ${n(penPoints(m, geo))} w 1 J 1 j\n")
         m.ink.forEach { stroke ->
@@ -225,5 +236,93 @@ object PdfSaver {
         ops.append("Q\n")
         stream.cosObject.createOutputStream().use { it.write(ops.toString().toByteArray(Charsets.US_ASCII)) }
         return PDAppearanceDictionary().apply { setNormalAppearance(stream) }
+    }
+
+    private fun newAnnotation(subtype: String): PDAnnotation {
+        val dict = COSDictionary()
+        dict.setName(COSName.TYPE, "Annot")
+        dict.setName(COSName.SUBTYPE, subtype)
+        return PDAnnotation.createAnnotation(dict)
+    }
+
+    private fun n(v: Float) = String.format(Locale.US, "%.3f", v)
+
+    /**
+     * Typed text as a standard FreeText annotation. The words are stored as
+     * text (so other apps can read and edit them), and how they look is stored
+     * as a sharp picture drawn by Android, so Malayalam and every other script
+     * shows correctly in any PDF app.
+     */
+    private fun freeText(doc: PDDocument, m: Mark, geo: PageGeometry): PDAnnotation {
+        val a = newAnnotation("FreeText")
+        val rect = pdfRect(m, geo)
+        val box = m.boxes.first()
+        val points = m.fontSize * geo.shownWidth
+        val c = rgb(m.color)
+        a.rectangle = rect
+        a.contents = m.text
+        a.cosObject.setString(COSName.DA, "/Helv ${n(points)} Tf ${n(c[0])} ${n(c[1])} ${n(c[2])} rg")
+        a.cosObject.setItem(COSName.BS, COSDictionary().apply { setFloat(COSName.W, 0f) })
+        a.isPrinted = true
+        a.setModifiedDate(Calendar.getInstance())
+
+        // Picture of the text at 4 pixels per point, kept within a sensible size
+        val scale = 4f
+        val wPx = (box.width() * geo.shownWidth * scale).toInt().coerceIn(1, 4096)
+        val hPx = (box.height() * geo.shownHeight * scale).toInt().coerceIn(1, 4096)
+        var bitmap = Bitmap.createBitmap(wPx, hPx, Bitmap.Config.ARGB_8888)
+        TextBox.draw(Canvas(bitmap), m.text, points * scale, 0xFF000000.toInt() or m.color, 0f, 0f)
+        if (geo.turnDegrees != 0) {
+            // The page is shown turned, so turn the picture back the other way
+            val turned = Bitmap.createBitmap(
+                bitmap, 0, 0, bitmap.width, bitmap.height,
+                Matrix().apply { postRotate(-geo.turnDegrees.toFloat()) }, true,
+            )
+            bitmap.recycle()
+            bitmap = turned
+        }
+        val image = LosslessFactory.createFromImage(doc, bitmap)
+        bitmap.recycle()
+
+        val stream = PDAppearanceStream(doc)
+        stream.bBox = rect
+        val resources = PDResources()
+        val name = resources.add(image)
+        stream.resources = resources
+        val ops = "q ${n(rect.width)} 0 0 ${n(rect.height)} ${n(rect.lowerLeftX)} ${n(rect.lowerLeftY)} cm /${name.name} Do Q\n"
+        stream.cosObject.createOutputStream().use { it.write(ops.toByteArray(Charsets.US_ASCII)) }
+        a.appearance = PDAppearanceDictionary().apply { setNormalAppearance(stream) }
+        return a
+    }
+
+    /** A sticky note: a standard Text annotation with a small note icon drawn in its colour. */
+    private fun note(doc: PDDocument, m: Mark, geo: PageGeometry): PDAnnotation {
+        val a = newAnnotation("Text")
+        val rect = pdfRect(m, geo)
+        a.rectangle = rect
+        a.contents = m.text
+        a.color = PDColor(rgb(m.color), PDDeviceRGB.INSTANCE)
+        a.cosObject.setName(COSName.NAME, "Comment")
+        a.isPrinted = true
+        a.setModifiedDate(Calendar.getInstance())
+
+        val c = rgb(m.color)
+        val x = rect.lowerLeftX
+        val y = rect.lowerLeftY
+        val w = rect.width
+        val h = rect.height
+        val ops = StringBuilder()
+        ops.append("q ${n(c[0])} ${n(c[1])} ${n(c[2])} rg 0.1 0.1 0.1 RG ${n(w * 0.04f)} w\n")
+        ops.append("${n(x + w * 0.08f)} ${n(y + h * 0.08f)} ${n(w * 0.84f)} ${n(h * 0.84f)} re B\n")
+        for (k in 0 until 3) {
+            val ly = y + h * (0.68f - k * 0.18f)
+            ops.append("${n(x + w * 0.25f)} ${n(ly)} m ${n(x + w * (if (k == 2) 0.55f else 0.75f))} ${n(ly)} l S\n")
+        }
+        ops.append("Q\n")
+        val stream = PDAppearanceStream(doc)
+        stream.bBox = rect
+        stream.cosObject.createOutputStream().use { it.write(ops.toString().toByteArray(Charsets.US_ASCII)) }
+        a.appearance = PDAppearanceDictionary().apply { setNormalAppearance(stream) }
+        return a
     }
 }

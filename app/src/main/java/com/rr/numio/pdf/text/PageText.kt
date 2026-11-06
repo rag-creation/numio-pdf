@@ -9,6 +9,8 @@ import kotlin.math.min
  */
 data class NBox(val left: Float, val top: Float, val right: Float, val bottom: Float) {
     fun union(o: NBox) = NBox(min(left, o.left), min(top, o.top), max(right, o.right), max(bottom, o.bottom))
+    fun width() = right - left
+    fun height() = bottom - top
 }
 
 /** One character (or a word / line break marker when [separator] is true). */
