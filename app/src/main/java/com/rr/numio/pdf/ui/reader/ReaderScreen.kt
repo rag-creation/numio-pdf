@@ -8,6 +8,9 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import com.rr.numio.pdf.text.NBox
 import com.rr.numio.pdf.edit.Edit
 import com.rr.numio.pdf.edit.ColorSample
+import com.rr.numio.pdf.data.Bookmark
+import com.rr.numio.pdf.data.PageLayout
+import com.rr.numio.pdf.data.PageLook
 import com.rr.numio.pdf.edit.Signature
 import com.rr.numio.pdf.data.SignatureStore
 import com.rr.numio.pdf.form.FieldKind
@@ -39,6 +42,8 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.stopScroll
+import androidx.compose.foundation.gestures.snapping.SnapPosition
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -138,6 +143,13 @@ fun ReaderScreen(
     onSignaturesUnlocked: () -> Unit,
     onUndo: () -> Unit,
     onSave: (page: Int) -> Unit,
+    look: PageLook,
+    layout: PageLayout,
+    onLook: (PageLook) -> Unit,
+    onLayout: (PageLayout) -> Unit,
+    bookmarks: List<Bookmark>,
+    onToggleBookmark: (Int) -> Unit,
+    onRenameBookmark: (page: Int, name: String) -> Unit,
 ) {
     val doc = state.doc
     val count = doc.pageCount
@@ -158,6 +170,8 @@ fun ReaderScreen(
     var preview by remember { mutableStateOf<Mark?>(null) }
     // Signing: the sheet is open, then the chosen signature waits for a tap on the page
     var signing by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var contentsOpen by remember { mutableStateOf(false) }
     var pendingSignature by remember { mutableStateOf<Signature?>(null) }
     // A text or choice form field being filled
     var fillingField by remember { mutableStateOf<FormField?>(null) }
@@ -355,6 +369,8 @@ fun ReaderScreen(
         Pages(
             doc = doc,
             listState = listState,
+            look = look,
+            layout = layout,
             selection = selection,
             edits = edits,
             focused = editing?.id,
@@ -387,12 +403,36 @@ fun ReaderScreen(
                 name = state.name,
                 current = current,
                 count = count,
-                starred = starred,
+                bookmarked = bookmarks.any { it.page == current },
                 unsaved = edits.size,
                 onBack = onBack,
-                onStar = onStar,
+                onBookmark = { onToggleBookmark(current) },
                 onUndo = onUndo,
                 onSave = { onSave(current) },
+                menu = {
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(PIcons.More, contentDescription = "More", tint = Numio.Text)
+                        }
+                        ReadingMenu(
+                            open = menuOpen,
+                            look = look,
+                            layout = layout,
+                            starred = starred,
+                            onDismiss = { menuOpen = false },
+                            onContents = { contentsOpen = true },
+                            onLook = onLook,
+                            onLayout = { new ->
+                                // Stay on the same page when the layout changes
+                                val here = current
+                                onLayout(new)
+                                jump(here)
+                            },
+                            onGoTo = { askPage = true },
+                            onStar = onStar,
+                        )
+                    }
+                },
             )
         }
 
@@ -685,6 +725,21 @@ fun ReaderScreen(
         }
     } }
 
+    if (contentsOpen) {
+        ContentsSheet(
+            doc = doc,
+            current = current,
+            bookmarks = bookmarks,
+            onJump = { page ->
+                contentsOpen = false
+                jump(page)
+            },
+            onToggleBookmark = onToggleBookmark,
+            onRename = onRenameBookmark,
+            onDismiss = { contentsOpen = false },
+        )
+    }
+
     if (signing) {
         SignDialog(
             store = signatures,
@@ -720,6 +775,8 @@ fun ReaderScreen(
 private fun Pages(
     doc: PdfDoc,
     listState: LazyListState,
+    look: PageLook,
+    layout: PageLayout,
     selection: Selection?,
     edits: List<Edit>,
     focused: Long?,
@@ -756,11 +813,18 @@ private fun Pages(
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
         val pageWidth: Dp = maxWidth - PAGE_SIDE * 2
         val baseWidthPx = with(density) { pageWidth.roundToPx() }.coerceAtLeast(1)
-        // Zoomed in far enough: draw pages at twice the size so text stays sharp
-        val renderWidth = if (sharp) baseWidthPx * 2 else baseWidthPx
 
         val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 72.dp
         val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp
+        val onePage = layout == PageLayout.ONE_PAGE
+        val fitHeightPx = with(density) { (maxHeight - top - bottom).toPx() }.coerceAtLeast(1f)
+
+        /** A page's width on screen: the full width, or (one page at a time) small enough for the whole page to fit. */
+        fun widthPx(index: Int): Int {
+            if (!onePage) return baseWidthPx
+            val aspect = doc.pages[index].aspect
+            return minOf(baseWidthPx, (fitHeightPx / aspect).toInt()).coerceAtLeast(1)
+        }
 
         fun clamp(w: Float, h: Float) {
             offX = offX.coerceIn(w - scale * w, 0f)
@@ -796,8 +860,9 @@ private fun Pages(
                 if (page != null) item.index == page else ly >= top && ly <= top + item.size
             } ?: return null
             val top = item.offset - info.viewportStartOffset
-            val left = (w - baseWidthPx) / 2f
-            return PageHit(item.index, (lx - left) / baseWidthPx, (ly - top) / item.size.coerceAtLeast(1))
+            val pw = widthPx(item.index)
+            val left = (w - pw) / 2f
+            return PageHit(item.index, (lx - left) / pw, (ly - top) / item.size.coerceAtLeast(1))
         }
 
         // Where the two selection handles are on screen
@@ -807,16 +872,17 @@ private fun Pages(
             val boxes = sel.boxes
             if (boxes.isEmpty()) return null
             val top = item.offset - info.viewportStartOffset
-            val left = (w - baseWidthPx) / 2f
+            val pw = widthPx(sel.page)
+            val left = (w - pw) / 2f
             fun screen(nx: Float, ny: Float) =
-                Offset(offX + scale * (left + nx * baseWidthPx), offY + scale * (top + ny * item.size))
+                Offset(offX + scale * (left + nx * pw), offY + scale * (top + ny * item.size))
             return screen(boxes.first().left, boxes.first().bottom) to screen(boxes.last().right, boxes.last().bottom)
         }
 
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(baseWidthPx) {
+                .pointerInput(baseWidthPx, onePage, fitHeightPx) {
                     val slop = viewConfiguration.touchSlop
                     val longPressMs = viewConfiguration.longPressTimeoutMillis
                     val grab = 36.dp.toPx()
@@ -841,7 +907,7 @@ private fun Pages(
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
                                 if (event.changes.none { it.pressed }) break
                                 val pan = event.calculatePan()
-                                dx += pan.x / scale / baseWidthPx
+                                dx += pan.x / scale / widthPx(mv.page)
                                 dy += pan.y / scale / itemH
                                 if (event.changes.count { it.pressed } >= 2) zoom *= event.calculateZoom()
                                 now = TextBox.moved(mv, dx, dy, zoom, aspect)
@@ -1022,11 +1088,14 @@ private fun Pages(
                 },
         ) {
             val fills = Edits.fills(edits)
+            // One page at a time: a swipe settles on the next page, centred
+            val snap = rememberSnapFlingBehavior(listState, SnapPosition.Center)
             LazyColumn(
                 state = listState,
+                flingBehavior = if (onePage) snap else ScrollableDefaults.flingBehavior(),
                 userScrollEnabled = !zoomed,
                 contentPadding = PaddingValues(top = top, bottom = bottom),
-                verticalArrangement = Arrangement.spacedBy(PAGE_GAP),
+                verticalArrangement = Arrangement.spacedBy(if (onePage) PAGE_GAP * 3 else PAGE_GAP),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .fillMaxSize()
@@ -1039,8 +1108,12 @@ private fun Pages(
                     },
             ) {
                 items(doc.pageCount, key = { it }) { index ->
+                    val pw = widthPx(index)
                     PageView(
-                        doc, index, pageWidth, baseWidthPx, renderWidth,
+                        doc, index, with(density) { pw.toDp() }, pw,
+                        // Zoomed in far enough: draw pages at twice the size so text stays sharp
+                        if (sharp) pw * 2 else pw,
+                        look = look,
                         selected = selection?.takeIf { it.page == index }?.boxes,
                         edits = edits,
                         fills = fills,
@@ -1062,6 +1135,7 @@ private fun PageView(
     width: Dp,
     baseWidthPx: Int,
     renderWidthPx: Int,
+    look: PageLook,
     selected: List<NBox>?,
     edits: List<Edit>,
     fills: Map<String, String>,
@@ -1085,7 +1159,7 @@ private fun PageView(
         Modifier
             .width(width)
             .aspectRatio(1f / aspect)
-            .background(Numio.Paper),
+            .background(pageBlank(look)),
         contentAlignment = Alignment.Center,
     ) {
         val b = bitmap
@@ -1095,15 +1169,16 @@ private fun PageView(
                 bitmap = image,
                 contentDescription = "Page ${index + 1}",
                 contentScale = ContentScale.FillBounds,
+                colorFilter = remember(look) { pageFilter(look) },
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             Text("${index + 1}", style = MaterialTheme.typography.bodySmall, color = Numio.Line)
         }
-        if (fields.isNotEmpty()) FormOverlay(fields, fills, bitmap)
+        if (fields.isNotEmpty()) FormOverlay(fields, fills, bitmap, look)
         val applied = Edits.apply(saved, edits, index)
         val marks = if (preview == null) applied else applied.map { if (it.id == preview.id) preview else it }
-        if (marks.isNotEmpty()) MarksOverlay(marks, focused, scale)
+        if (marks.isNotEmpty()) MarksOverlay(marks, focused, scale, look)
         if (live != null) LiveInk(live.points, live.pen.width, live.pen.color)
         if (!selected.isNullOrEmpty()) SelectionOverlay(selected, scale)
     }
@@ -1114,12 +1189,13 @@ private fun TopBar(
     name: String,
     current: Int,
     count: Int,
-    starred: Boolean,
+    bookmarked: Boolean,
     unsaved: Int,
     onBack: () -> Unit,
-    onStar: () -> Unit,
+    onBookmark: () -> Unit,
     onUndo: () -> Unit,
     onSave: () -> Unit,
+    menu: @Composable () -> Unit,
 ) {
     Row(
         Modifier
@@ -1138,27 +1214,28 @@ private fun TopBar(
         }
         if (unsaved > 0) {
             IconButton(onClick = onUndo) {
-                Icon(PIcons.Undo, contentDescription = "Undo last mark", tint = Numio.Text)
+                Icon(PIcons.Undo, contentDescription = "Undo last change", tint = Numio.Text)
             }
             Box(
                 Modifier
                     .padding(horizontal = 4.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(Numio.Amber)
-                    .clickable(onClickLabel = "Save marks into the PDF", role = Role.Button, onClick = onSave)
+                    .clickable(onClickLabel = "Save changes into the PDF", role = Role.Button, onClick = onSave)
                     .padding(horizontal = 16.dp, vertical = 9.dp),
             ) {
                 Text("Save", style = MaterialTheme.typography.labelLarge, color = Numio.OnAmber)
             }
         } else {
-            IconButton(onClick = onStar) {
+            IconButton(onClick = onBookmark) {
                 Icon(
-                    if (starred) PIcons.StarFilled else PIcons.Star,
-                    contentDescription = if (starred) "Remove star" else "Star",
-                    tint = if (starred) Numio.Amber else Numio.Text,
+                    if (bookmarked) PIcons.BookmarkFilled else PIcons.Bookmark,
+                    contentDescription = if (bookmarked) "Remove bookmark on this page" else "Bookmark this page",
+                    tint = if (bookmarked) Numio.Amber else Numio.Text,
                 )
             }
         }
+        menu()
     }
 }
 

@@ -45,12 +45,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.rr.numio.pdf.form.FieldKind
+import com.rr.numio.pdf.data.PageLook
+import androidx.compose.ui.graphics.toArgb
 import com.rr.numio.pdf.form.FormField
 import com.rr.numio.pdf.ui.theme.Numio
 
 /** Pale blue over fillable boxes, so it's clear what can be filled. */
 private val FieldTint = Color(0x2E4D8DFF)
-private val Ink = Color(0xFF111111)
 
 /**
  * Draws a form's boxes and what's in them. Android's renderer leaves form
@@ -58,7 +59,9 @@ private val Ink = Color(0xFF111111)
  * [fills] are values changed since the last save, by field name.
  */
 @Composable
-fun BoxScope.FormOverlay(fields: List<FormField>, fills: Map<String, String>, page: Bitmap?) {
+fun BoxScope.FormOverlay(fields: List<FormField>, fills: Map<String, String>, page: Bitmap?, look: PageLook = PageLook.NORMAL) {
+    // Values are drawn over the coloured page, so match its colours
+    val ink = Color(0xFF000000.toInt() or onPage(0x111111, look))
     Canvas(Modifier.matchParentSize()) {
         val canvas = drawContext.canvas.nativeCanvas
         fields.forEach { f ->
@@ -73,7 +76,7 @@ fun BoxScope.FormOverlay(fields: List<FormField>, fills: Map<String, String>, pa
                 if (!f.readOnly) drawRect(FieldTint, Offset(l, t), Size(w, h))
                 if (pending == null) return@forEach
                 val inset = if (f.kind == FieldKind.CHECK || f.kind == FieldKind.RADIO) minOf(w, h) * 0.14f else 1f
-                drawRect(fieldBackground(page, f), Offset(l + inset, t + inset), Size(w - inset * 2, h - inset * 2))
+                drawRect(fieldBackground(page, f, look), Offset(l + inset, t + inset), Size(w - inset * 2, h - inset * 2))
             } else if (!f.readOnly) {
                 drawRect(FieldTint, Offset(l, t), Size(w, h))
             }
@@ -88,14 +91,14 @@ fun BoxScope.FormOverlay(fields: List<FormField>, fills: Map<String, String>, pa
                         lineTo(cx - s * 0.08f, cy + s * 0.26f)
                         lineTo(cx + s * 0.34f, cy - s * 0.26f)
                     }
-                    drawPath(tick, Ink, style = Stroke(s * 0.14f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    drawPath(tick, ink, style = Stroke(s * 0.14f, cap = StrokeCap.Round, join = StrokeJoin.Round))
                 }
                 FieldKind.RADIO -> if (f.isOn(value)) {
-                    drawCircle(Ink, radius = minOf(w, h) * 0.25f, center = Offset(l + w / 2f, t + h / 2f))
+                    drawCircle(ink, radius = minOf(w, h) * 0.25f, center = Offset(l + w / 2f, t + h / 2f))
                 }
                 FieldKind.TEXT, FieldKind.CHOICE -> if (value.isNotEmpty()) {
                     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = 0xFF111111.toInt()
+                        color = ink.toArgb()
                         typeface = Typeface.SANS_SERIF
                     }
                     val pad = minOf(h * 0.12f, 2.dp.toPx())
@@ -134,8 +137,8 @@ fun BoxScope.FormOverlay(fields: List<FormField>, fills: Map<String, String>, pa
 private val SYSTEM_DRAWS_FORMS = Build.VERSION.SDK_INT >= 35
 
 /** A field's own background colour, read from the drawn page just inside its top edge. */
-private fun fieldBackground(page: Bitmap?, f: FormField): Color {
-    if (page == null || page.isRecycled) return Color.White
+private fun fieldBackground(page: Bitmap?, f: FormField, look: PageLook): Color {
+    if (page == null || page.isRecycled) return pageBlank(look)
     val y = ((f.box.top + f.box.height() * 0.1f) * page.height).toInt().coerceIn(0, page.height - 1)
     val samples = listOf(0.06f, 0.25f, 0.5f, 0.75f, 0.94f).map { k ->
         val x = ((f.box.left + f.box.width() * k) * page.width).toInt().coerceIn(0, page.width - 1)
@@ -143,7 +146,29 @@ private fun fieldBackground(page: Bitmap?, f: FormField): Color {
     }
     // The most common of the samples (ignores one that happens to land on a letter)
     val pick = samples.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: samples[2]
-    return Color(pick)
+    // The page is shown through a colour filter (night / sepia), so the cover must be too
+    return when (look) {
+        PageLook.NORMAL -> Color(pick)
+        else -> Color(filtered(pick, look))
+    }
+}
+
+/** A colour as it looks through the page colour filter. */
+private fun filtered(argb: Int, look: PageLook): Int {
+    val r = ((argb shr 16) and 0xFF).toFloat()
+    val g = ((argb shr 8) and 0xFF).toFloat()
+    val b = (argb and 0xFF).toFloat()
+    fun c(v: Float) = v.toInt().coerceIn(0, 255)
+    return when (look) {
+        PageLook.DARK -> {
+            val nr = 0.5166f * r - 1.287f * g - 0.1296f * b + 240f
+            val ng = -0.3834f * r - 0.387f * g - 0.1296f * b + 240f
+            val nb = -0.3834f * r - 1.287f * g + 0.7704f * b + 240f
+            (0xFF shl 24) or (c(nr) shl 16) or (c(ng) shl 8) or c(nb)
+        }
+        PageLook.SEPIA -> (0xFF shl 24) or (c(r) shl 16) or (c(g * 0.93f) shl 8) or c(b * 0.80f)
+        PageLook.NORMAL -> argb
+    }
 }
 
 /** Typing into a text field. */

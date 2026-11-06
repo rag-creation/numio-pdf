@@ -22,6 +22,8 @@ import com.tom_roush.pdfbox.pdmodel.interactive.form.PDRadioButton
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTerminalField
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTextField
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDVariableText
+import com.rr.numio.pdf.data.OutlineEntry
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem
 import com.rr.numio.pdf.form.FieldKind
 import com.rr.numio.pdf.form.FormField
 import com.tom_roush.pdfbox.text.PDFTextStripper
@@ -59,6 +61,30 @@ class TextExtractor(private val context: Context, private val source: Uri) {
     suspend fun fields(index: Int): List<FormField> = lock.withLock {
         val all = fieldsByPage ?: withContext(Dispatchers.IO) { readFields() }.also { fieldsByPage = it }
         all[index] ?: emptyList()
+    }
+
+    /** The PDF's own table of contents (empty if it has none), flattened with depth. */
+    suspend fun outline(): List<OutlineEntry> = lock.withLock {
+        withContext(Dispatchers.IO) { readOutline() }
+    }
+
+    private fun readOutline(): List<OutlineEntry> {
+        val d = load() ?: return emptyList()
+        return try {
+            val root = d.documentCatalog.documentOutline ?: return emptyList()
+            val out = ArrayList<OutlineEntry>()
+            fun walk(item: PDOutlineItem, depth: Int) {
+                if (out.size >= 3000) return
+                val page = runCatching { item.findDestinationPage(d)?.let { d.pages.indexOf(it) } }.getOrNull() ?: -1
+                val title = item.title?.trim().orEmpty()
+                if (title.isNotEmpty()) out += OutlineEntry(title, page, depth)
+                item.children().forEach { walk(it, depth + 1) }
+            }
+            root.children().forEach { walk(it, 0) }
+            out
+        } catch (e: Throwable) {
+            emptyList()
+        }
     }
 
     /** Form boxes of a page if already read, without waiting. */

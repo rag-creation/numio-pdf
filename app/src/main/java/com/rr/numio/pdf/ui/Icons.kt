@@ -74,5 +74,9 @@ object PIcons {
         "M8 9h8M8 12.5h4",
     )
     val Sign = stroke("Sign", "M3.5 16.5c2.5-1 3.5-8.5 6-8.5c1.8 0-.8 8.5 1.8 8.5c1.6 0 2.4-3.5 4-3.5c1 0 1 2.6 2.2 2.6c1 0 1.6-1.1 3-1.1", "M3.5 20.5h17")
+    val Bookmark = stroke("Bookmark", "M7 3.5h10a1 1 0 0 1 1 1V20.5l-6-4l-6 4V4.5a1 1 0 0 1 1-1z")
+    val BookmarkFilled = fill("BookmarkFilled", "M7 3.5h10a1 1 0 0 1 1 1V20.5l-6-4l-6 4V4.5a1 1 0 0 1 1-1z")
+    val Contents = stroke("Contents", "M4.5 6h1M9 6h10.5M4.5 12h1M9 12h10.5M4.5 18h1M9 18h10.5")
+    val Check = stroke("Check", "M5 12.5l4.5 4.5L19 7.5", width = 2.2f)
     val Lock = stroke("Lock", "M6.5 10.5h11a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1 -1.5 1.5h-11a1.5 1.5 0 0 1 -1.5 -1.5v-7a1.5 1.5 0 0 1 1.5 -1.5z", "M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5")
 }

@@ -86,6 +86,13 @@ fun PdfApp(
                     signatures = vm.signatures,
                     signaturesUnlocked = vm.signaturesUnlocked,
                     onSignaturesUnlocked = { vm.signaturesUnlocked = true },
+                    look = vm.look,
+                    layout = vm.layout,
+                    onLook = vm::setLook,
+                    onLayout = vm::setLayout,
+                    bookmarks = vm.bookmarks,
+                    onToggleBookmark = vm::toggleBookmark,
+                    onRenameBookmark = vm::renameBookmark,
                     onUndo = vm::undoMark,
                     onSave = { page -> save(page, r.name) },
                 )
