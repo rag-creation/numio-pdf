@@ -148,6 +148,7 @@ fun ReaderScreen(
     onSignaturesUnlocked: () -> Unit,
     onUndo: () -> Unit,
     onSave: (page: Int) -> Unit,
+    onOrganise: (page: Int) -> Unit,
     look: PageLook,
     layout: PageLayout,
     onLook: (PageLook) -> Unit,
@@ -535,6 +536,11 @@ fun ReaderScreen(
                             starred = starred,
                             onDismiss = { menuOpen = false },
                             onContents = { contentsOpen = true },
+                            onOrganise = {
+                                selection = null
+                                editingRef = null
+                                onOrganise(current)
+                            },
                             onMarks = {
                                 selection = null
                                 editingRef = null

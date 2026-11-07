@@ -38,6 +38,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Organise pages: another PDF whose pages are added at the end
+    private val addPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.addToOrganise(uri)
+    }
+
+    // Organise pages: the rearranged PDF saved as a new file
+    private val savePagesCopy = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        if (uri != null) {
+            keepAccess(uri)
+            vm.saveOrganised(uri)
+        }
+    }
+
+    // Organise pages: the picked pages saved as a new PDF
+    private val extractTo = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        if (uri != null) vm.extractPages(uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -53,6 +71,9 @@ class MainActivity : ComponentActivity() {
                     onOpenPicker = ::pick,
                     onShare = ::share,
                     onSaveCopy = ::askWhereToSave,
+                    onAddPdf = { launchSafely { addPdf.launch(arrayOf("application/pdf")) } },
+                    onSavePagesCopy = { name -> launchSafely { savePagesCopy.launch("${baseName(name)} (pages).pdf") } },
+                    onExtract = { name -> launchSafely { extractTo.launch("${baseName(name)} (extract).pdf") } },
                     onLeave = ::finish,
                 )
             }
@@ -82,6 +103,16 @@ class MainActivity : ComponentActivity() {
         } ?: return
         keepAccess(uri)
         vm.open(uri, fromOutside = true)
+    }
+
+    private fun baseName(name: String) = name.removeSuffix(".pdf").removeSuffix(".PDF")
+
+    private fun launchSafely(block: () -> Unit) {
+        try {
+            block()
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, "This phone has no screen for choosing files.", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun askWhereToSave(name: String) {

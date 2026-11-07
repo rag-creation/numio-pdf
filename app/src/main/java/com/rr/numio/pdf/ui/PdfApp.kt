@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rr.numio.pdf.AppViewModel
 import com.rr.numio.pdf.ReaderState
 import com.rr.numio.pdf.ui.library.LibraryScreen
+import com.rr.numio.pdf.ui.pages.OrganiseScreen
 import com.rr.numio.pdf.ui.reader.ReaderScreen
 import com.rr.numio.pdf.ui.settings.SettingsScreen
 import com.rr.numio.pdf.ui.theme.Numio
@@ -39,6 +40,9 @@ fun PdfApp(
     onOpenPicker: () -> Unit,
     onShare: (uri: String, name: String) -> Unit,
     onSaveCopy: (name: String) -> Unit,
+    onAddPdf: () -> Unit,
+    onSavePagesCopy: (name: String) -> Unit,
+    onExtract: (name: String) -> Unit,
     onLeave: () -> Unit,
 ) {
     val files by vm.store.files.collectAsStateWithLifecycle()
@@ -65,7 +69,19 @@ fun PdfApp(
 
     Box(Modifier.fillMaxSize().background(Numio.Bg)) {
         when (val r = vm.reader) {
-            is ReaderState.Open -> {
+            is ReaderState.Open -> if (vm.organiser != null) {
+                val org = vm.organiser!!
+                OrganiseScreen(
+                    org = org,
+                    name = r.name,
+                    busy = vm.organiseBusy,
+                    onAddPdf = onAddPdf,
+                    onExtract = { onExtract(r.name) },
+                    onSave = { if (vm.canWriteOriginal()) vm.saveOrganised(null) else onSavePagesCopy(r.name) },
+                    onClose = vm::stopOrganising,
+                    onNotice = { vm.notice = it },
+                )
+            } else {
                 fun leave() {
                     if (vm.edits.isNotEmpty()) askLeave = true else back()
                 }
@@ -96,6 +112,7 @@ fun PdfApp(
                     onRenameBookmark = vm::renameBookmark,
                     onUndo = vm::undoMark,
                     onSave = { page -> save(page, r.name) },
+                    onOrganise = vm::startOrganising,
                 )
                 if (askLeave) {
                     val n = vm.edits.size
