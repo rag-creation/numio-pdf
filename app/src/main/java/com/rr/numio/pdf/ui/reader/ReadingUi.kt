@@ -106,7 +106,7 @@ fun onPage(color: Int, look: PageLook): Int {
     return if (light < 0.25f) 0xE6E4DE else color
 }
 
-/** The ⋮ menu: contents, page colour, layout and go to page. */
+/** The ⋮ menu: contents, marks, page colour, layout and go to page. */
 @Composable
 fun ReadingMenu(
     open: Boolean,
@@ -115,6 +115,7 @@ fun ReadingMenu(
     starred: Boolean,
     onDismiss: () -> Unit,
     onContents: () -> Unit,
+    onMarks: () -> Unit,
     onLook: (PageLook) -> Unit,
     onLayout: (PageLayout) -> Unit,
     onGoTo: () -> Unit,
@@ -125,6 +126,11 @@ fun ReadingMenu(
             text = { Text("Contents & bookmarks") },
             leadingIcon = { Icon(PIcons.Contents, contentDescription = null, tint = Numio.Text) },
             onClick = { onDismiss(); onContents() },
+        )
+        DropdownMenuItem(
+            text = { Text("Marks: highlights, notes…") },
+            leadingIcon = { Icon(PIcons.Highlight, contentDescription = null, tint = Numio.Text) },
+            onClick = { onDismiss(); onMarks() },
         )
         DropdownMenuItem(
             text = { Text("Go to page") },

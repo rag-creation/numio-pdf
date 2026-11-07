@@ -177,6 +177,7 @@ fun ReaderScreen(
     var signing by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var contentsOpen by remember { mutableStateOf(false) }
+    var marksOpen by remember { mutableStateOf(false) }
     var pendingSignature by remember { mutableStateOf<Signature?>(null) }
     // A text or choice form field being filled
     var fillingField by remember { mutableStateOf<FormField?>(null) }
@@ -378,24 +379,26 @@ fun ReaderScreen(
     var searched by remember { mutableIntStateOf(0) }
     var noText by remember { mutableStateOf(false) }
 
-    /** Scrolls so a result sits a third of the way down the screen. */
-    fun showHit(hit: SearchHit) {
+    /** Scrolls so a spot ([top] as a fraction of the page) sits a third of the way down the screen. */
+    fun showSpot(page: Int, top: Float) {
         jumpJob[0]?.cancel()
         jumpJob[0] = scope.launch {
-            listState.scrollToItem(hit.page)
+            listState.scrollToItem(page)
             val info = listState.layoutInfo
-            val item = info.visibleItemsInfo.firstOrNull { it.index == hit.page }
+            val item = info.visibleItemsInfo.firstOrNull { it.index == page }
             if (item != null) {
-                val y = item.offset - info.viewportStartOffset + (hit.boxes.firstOrNull()?.top ?: 0f) * item.size
+                val y = item.offset - info.viewportStartOffset + top * item.size
                 val viewport = info.viewportEndOffset - info.viewportStartOffset
                 listState.scrollBy(y - viewport * 0.33f)
             }
-            pinned = hit.page
+            pinned = page
             val here = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
             snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }.first { it != here }
             pinned = null
         }
     }
+
+    fun showHit(hit: SearchHit) = showSpot(hit.page, hit.boxes.firstOrNull()?.top ?: 0f)
 
     fun stepHit(by: Int) {
         if (hits.isEmpty()) return
@@ -532,6 +535,11 @@ fun ReaderScreen(
                             starred = starred,
                             onDismiss = { menuOpen = false },
                             onContents = { contentsOpen = true },
+                            onMarks = {
+                                selection = null
+                                editingRef = null
+                                marksOpen = true
+                            },
                             onLook = onLook,
                             onLayout = { new ->
                                 // Stay on the same page when the layout changes
@@ -848,6 +856,22 @@ fun ReaderScreen(
             onToggleBookmark = onToggleBookmark,
             onRename = onRenameBookmark,
             onDismiss = { contentsOpen = false },
+        )
+    }
+
+    if (marksOpen) {
+        MarksSheet(
+            doc = doc,
+            name = state.name,
+            edits = edits,
+            onOpen = { m ->
+                marksOpen = false
+                // Go there and pick it, so it can be recoloured, changed or removed straight away
+                showSpot(m.page, m.boxes.firstOrNull()?.top ?: 0f)
+                chrome = true
+                editingRef = m.page to m.id
+            },
+            onDismiss = { marksOpen = false },
         )
     }
 

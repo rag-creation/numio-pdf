@@ -53,6 +53,7 @@ editing behind a subscription. PDF Reader is different:
 - ✅ **Pen** for circling, ticking and scribbling
 - ✅ **Text boxes**: drag to move, pinch to resize, with an optional white background
 - ✅ **Sticky notes**
+- ✅ **All your marks in one list**: filter by type, tap one to jump to it, and share or copy them all as text
 - ✅ Saved as real PDF annotations, so they show up in Adobe, Chrome and other apps too
 
 ### ✍️ Editing, forms and signing
