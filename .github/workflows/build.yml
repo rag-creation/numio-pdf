@@ -70,10 +70,13 @@ jobs:
         with:
           name: PDFReaderTest.apk
           path: PDFReaderTest.apk
+          # Test builds are installed soon after; keeping them a week stops them filling storage
+          retention-days: 7
 
       - uses: actions/upload-artifact@v4
         with:
           name: build-reports
+          retention-days: 7
           path: |
             permissions.txt
             release-dependencies.txt
