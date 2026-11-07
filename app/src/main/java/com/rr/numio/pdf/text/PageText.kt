@@ -144,6 +144,27 @@ class PageText(val glyphs: List<Glyph>) {
         sb.toString() to owner.toIntArray()
     }
 
+    /** The words whose letters sit inside [boxes], in reading order (for listing highlights). */
+    fun textIn(boxes: List<NBox>): String {
+        fun inside(b: NBox): Boolean {
+            val cx = (b.left + b.right) / 2f
+            val cy = (b.top + b.bottom) / 2f
+            return boxes.any { cx >= it.left && cx <= it.right && cy >= it.top && cy <= it.bottom }
+        }
+        val sb = StringBuilder()
+        var pendingSpace = false
+        glyphs.forEach { g ->
+            if (g.separator || g.text.isBlank()) {
+                if (sb.isNotEmpty()) pendingSpace = true
+            } else if (inside(g.box)) {
+                if (pendingSpace) sb.append(' ')
+                pendingSpace = false
+                sb.append(g.text)
+            }
+        }
+        return sb.toString().trim()
+    }
+
     /** The page's words as search compares them. */
     val searchText: String get() = searchable.first
 
