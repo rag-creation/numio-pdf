@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import com.rr.numio.pdf.edit.Ink
+import com.rr.numio.pdf.data.PageLook
 import com.rr.numio.pdf.edit.TextBox
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.nativeCanvas
@@ -87,9 +88,12 @@ fun BoxScope.SelectionOverlay(boxes: List<NBox>, scale: () -> Float) {
 
 /** Saved and unsaved marks on a page, drawn the way paper highlighters look. */
 @Composable
-fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float) {
+fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float, look: PageLook = PageLook.NORMAL) {
+    val night = look == PageLook.DARK
     Canvas(Modifier.matchParentSize()) {
-        marks.forEach { m ->
+        marks.forEach { original ->
+            // Night pages: dark pen / text shown light so it stays readable (screen only)
+            val m = if (night) original.copy(color = onPage(original.color, look)) else original
             if (m.id == focused) {
                 // The mark being changed gets a dashed amber outline
                 val pad = 3.dp.toPx() / scale().coerceAtLeast(1f)
@@ -116,10 +120,11 @@ fun BoxScope.MarksOverlay(marks: List<Mark>, focused: Long?, scale: () -> Float)
                 when (m.kind) {
                     // Multiply lets the black text show through, like ink from a real highlighter
                     MarkKind.HIGHLIGHT -> drawRect(
-                        color = c,
+                        // On night pages a see-through band instead (multiply would vanish on dark)
+                        color = if (night) c.copy(alpha = 0.4f) else c,
                         topLeft = Offset(left, top),
                         size = Size(right - left, bottom - top),
-                        blendMode = BlendMode.Multiply,
+                        blendMode = if (night) BlendMode.SrcOver else BlendMode.Multiply,
                     )
                     // Just under the box, so it clears the tails of g, y and p
                     MarkKind.UNDERLINE -> drawRect(

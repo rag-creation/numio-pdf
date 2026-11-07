@@ -25,6 +25,8 @@ class RecentStore(context: Context) {
 
     fun remove(uri: String) = save(Library.remove(_files.value, uri))
 
+    fun clear() = save(emptyList())
+
     private fun save(files: List<RecentFile>) {
         _files.value = files
         prefs.edit().putString(KEY, RecentCodec.encode(files)).apply()

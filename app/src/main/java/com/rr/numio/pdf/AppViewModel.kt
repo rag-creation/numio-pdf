@@ -13,6 +13,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.rr.numio.pdf.data.Bookmark
+import com.rr.numio.pdf.data.Bookmarks
+import com.rr.numio.pdf.data.PageLayout
+import com.rr.numio.pdf.data.PageLook
 import com.rr.numio.pdf.data.RecentStore
 import com.rr.numio.pdf.edit.Edit
 import com.rr.numio.pdf.edit.Edits
@@ -37,6 +41,60 @@ sealed interface ReaderState {
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     val store = RecentStore(app)
+
+    // ---- Reading: page colours and layout (remembered for every PDF), bookmarks (per PDF)
+    private val readingPrefs = app.getSharedPreferences("reading", android.content.Context.MODE_PRIVATE)
+
+    var look by mutableStateOf(
+        runCatching { PageLook.valueOf(readingPrefs.getString("look", null) ?: "") }.getOrDefault(PageLook.NORMAL),
+    )
+        private set
+    var layout by mutableStateOf(
+        runCatching { PageLayout.valueOf(readingPrefs.getString("layout", null) ?: "") }.getOrDefault(PageLayout.SCROLL),
+    )
+        private set
+
+    fun chooseLook(value: PageLook) {
+        look = value
+        readingPrefs.edit().putString("look", value.name).apply()
+    }
+
+    fun chooseLayout(value: PageLayout) {
+        layout = value
+        readingPrefs.edit().putString("layout", value.name).apply()
+    }
+
+    private val bookmarkPrefs = app.getSharedPreferences("bookmarks", android.content.Context.MODE_PRIVATE)
+
+    /** Bookmarks of the open PDF, in page order. */
+    var bookmarks by mutableStateOf<List<Bookmark>>(emptyList())
+        private set
+
+    private fun loadBookmarks(uri: String) {
+        bookmarks = Bookmarks.decode(bookmarkPrefs.getString(uri, "") ?: "")
+    }
+
+    private fun saveBookmarks(list: List<Bookmark>) {
+        val open = reader as? ReaderState.Open ?: return
+        bookmarks = list
+        bookmarkPrefs.edit().apply {
+            if (list.isEmpty()) remove(open.uri) else putString(open.uri, Bookmarks.encode(list))
+        }.apply()
+    }
+
+    fun toggleBookmark(page: Int) = saveBookmarks(Bookmarks.toggle(bookmarks, page))
+
+    fun renameBookmark(page: Int, name: String) = saveBookmarks(Bookmarks.rename(bookmarks, page, name))
+
+    /** Settings screen open (from the library's gear). */
+    var settingsOpen by mutableStateOf(false)
+
+    /** Forgets the library: list, stars, reading places and bookmarks. The PDFs aren't touched. */
+    fun clearRecent() {
+        store.files.value.forEach { Thumbnails.forget(getApplication(), it.uri) }
+        store.clear()
+        bookmarkPrefs.edit().clear().apply()
+    }
 
     /** Saved signatures, and whether they've been unlocked since the app opened. */
     val signatures = com.rr.numio.pdf.data.SignatureStore(app)
@@ -72,6 +130,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val doc = PdfDoc.open(ctx, uri)
             store.opened(key, name, size, doc.pageCount)
             if (page != null) store.setPage(key, page.coerceIn(0, doc.pageCount - 1))
+            loadBookmarks(key)
             ReaderState.Open(doc, key, name, store.get(key)?.lastPage ?: 0)
         } catch (e: OpenFailure) {
             ReaderState.Failed(e.message ?: "This file couldn't be opened.", key.takeIf { store.get(it) != null })
