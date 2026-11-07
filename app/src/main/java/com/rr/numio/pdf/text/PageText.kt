@@ -119,6 +119,53 @@ class PageText(val glyphs: List<Glyph>) {
             .trim()
     }
 
+    /**
+     * Searchable text: lower-case, every run of spaces and line breaks made one
+     * space, with which glyph each character came from.
+     */
+    private val searchable: Pair<String, IntArray> by lazy {
+        val sb = StringBuilder()
+        val owner = ArrayList<Int>()
+        var lastSpace = true
+        glyphs.forEachIndexed { i, g ->
+            val t = if (g.separator) " " else g.text
+            for (ch in t) {
+                if (ch.isWhitespace()) {
+                    if (lastSpace) continue
+                    lastSpace = true
+                    sb.append(' ')
+                } else {
+                    lastSpace = false
+                    sb.append(ch.lowercaseChar())
+                }
+                owner.add(i)
+            }
+        }
+        sb.toString() to owner.toIntArray()
+    }
+
+    /** The page's words as search compares them. */
+    val searchText: String get() = searchable.first
+
+    /**
+     * Every place [query] appears, as glyph ranges in reading order. Ignores case,
+     * and a space in the query matches any spacing or a line break.
+     */
+    fun find(query: String): List<IntRange> {
+        val q = normalizeQuery(query)
+        if (q.isEmpty()) return emptyList()
+        val (hay, owner) = searchable
+        val found = ArrayList<IntRange>()
+        var from = 0
+        while (true) {
+            val at = hay.indexOf(q, from)
+            if (at < 0) break
+            found.add(owner[at]..owner[at + q.length - 1])
+            from = at + q.length
+        }
+        return found
+    }
+
     /** One box per line covered by the selection, for drawing the highlight. */
     fun lineBoxes(range: IntRange): List<NBox> = lines.mapNotNull { line ->
         val inRange = line.indices.filter { it in range && glyphs[it].text.isNotBlank() }
@@ -138,3 +185,15 @@ data class Selection(val page: Int, val text: PageText, val start: Int, val end:
     /** The first real letter selected, to copy its size, line and font. */
     val firstGlyph: Glyph? get() = range.asSequence().map { text.glyphs[it] }.firstOrNull { !it.separator }
 }
+
+/** A query as [PageText.find] compares it: trimmed, lower-case, single spaces. */
+fun normalizeQuery(query: String): String =
+    query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ") { w ->
+        buildString { w.forEach { append(it.lowercaseChar()) } }
+    }
+
+/** One search result: where it is, and the boxes to light up. */
+data class SearchHit(val page: Int, val range: IntRange, val boxes: List<NBox>)
+
+/** A page searched: what was found, and whether it has any text (scans don't). */
+data class PageSearch(val hits: List<SearchHit>, val hasText: Boolean)

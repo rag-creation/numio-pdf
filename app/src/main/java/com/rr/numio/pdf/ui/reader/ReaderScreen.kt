@@ -24,6 +24,11 @@ import com.rr.numio.pdf.edit.MarkKind
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.rr.numio.pdf.text.Selection
+import com.rr.numio.pdf.text.SearchHit
+import com.rr.numio.pdf.text.normalizeQuery
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -365,6 +370,71 @@ fun ReaderScreen(
         }
     }
 
+    // ---- Search inside the PDF
+    var searching by remember { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val hits = remember { mutableStateListOf<SearchHit>() }
+    var hitAt by remember { mutableIntStateOf(-1) }
+    var searched by remember { mutableIntStateOf(0) }
+    var noText by remember { mutableStateOf(false) }
+
+    /** Scrolls so a result sits a third of the way down the screen. */
+    fun showHit(hit: SearchHit) {
+        jumpJob[0]?.cancel()
+        jumpJob[0] = scope.launch {
+            listState.scrollToItem(hit.page)
+            val info = listState.layoutInfo
+            val item = info.visibleItemsInfo.firstOrNull { it.index == hit.page }
+            if (item != null) {
+                val y = item.offset - info.viewportStartOffset + (hit.boxes.firstOrNull()?.top ?: 0f) * item.size
+                val viewport = info.viewportEndOffset - info.viewportStartOffset
+                listState.scrollBy(y - viewport * 0.33f)
+            }
+            pinned = hit.page
+            val here = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+            snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }.first { it != here }
+            pinned = null
+        }
+    }
+
+    fun stepHit(by: Int) {
+        if (hits.isEmpty()) return
+        hitAt = if (hitAt < 0) 0 else (hitAt + by + hits.size) % hits.size
+        showHit(hits[hitAt])
+    }
+
+    // Reads the pages one by one (text already read is reused), from the first;
+    // jumps to the first result at or after the page being read
+    LaunchedEffect(searching, query) {
+        hits.clear()
+        hitAt = -1
+        searched = 0
+        noText = false
+        val q = normalizeQuery(query)
+        if (!searching || q.isEmpty()) return@LaunchedEffect
+        delay(300)
+        val from = current
+        var anyText = false
+        for (p in 0 until count) {
+            val result = doc.text.search(p, q)
+            if (result.hasText) anyText = true
+            hits.addAll(result.hits)
+            searched = p + 1
+            if (hitAt < 0 && result.hits.isNotEmpty() && p >= from) {
+                hitAt = hits.size - result.hits.size
+                showHit(hits[hitAt])
+            }
+        }
+        if (hitAt < 0 && hits.isNotEmpty()) {
+            hitAt = 0
+            showHit(hits[0])
+        }
+        noText = !anyText
+    }
+    val hitsByPage by remember { derivedStateOf { hits.groupBy { it.page } } }
+
+    BackHandler(enabled = searching && layout != PageLayout.BOOK) { searching = false }
+
     if (layout == PageLayout.BOOK) {
         BookReader(
             doc = doc,
@@ -381,13 +451,15 @@ fun ReaderScreen(
         return
     }
 
-    Box(Modifier.fillMaxSize().background(Numio.Bg)) {
+    Box(Modifier.fillMaxSize().background(Numio.Desk)) {
         Pages(
             doc = doc,
             listState = listState,
             look = look,
             layout = layout,
             selection = selection,
+            found = if (searching) hitsByPage else emptyMap(),
+            activeHit = if (searching) hits.getOrNull(hitAt) else null,
             edits = edits,
             focused = editing?.id,
             movable = editing?.takeIf { it.kind == MarkKind.TEXT || it.kind == MarkKind.NOTE || it.kind == MarkKind.SIGN },
@@ -410,7 +482,23 @@ fun ReaderScreen(
         )
 
         AnimatedVisibility(
-            visible = chrome || drawing,
+            visible = searching,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            SearchBar(
+                query = query,
+                status = SearchStatus(hits.size, hitAt, searched, count, noText),
+                onQuery = { query = it },
+                onPrevious = { stepHit(-1) },
+                onNext = { stepHit(1) },
+                onClose = { searching = false },
+            )
+        }
+
+        AnimatedVisibility(
+            visible = (chrome || drawing) && !searching,
             enter = fadeIn() + slideInVertically { -it },
             exit = fadeOut() + slideOutVertically { -it },
             modifier = Modifier.align(Alignment.TopCenter),
@@ -423,6 +511,13 @@ fun ReaderScreen(
                 unsaved = edits.size,
                 onBack = onBack,
                 onBookmark = { onToggleBookmark(current) },
+                onSearch = {
+                    selection = null
+                    editingRef = null
+                    drawing = false
+                    placing = null
+                    searching = true
+                },
                 onUndo = onUndo,
                 onSave = { onSave(current) },
                 menu = {
@@ -582,7 +677,7 @@ fun ReaderScreen(
         }
 
         AnimatedVisibility(
-            visible = chrome && selection == null && editing == null && !drawing && placing == null,
+            visible = chrome && selection == null && editing == null && !drawing && placing == null && !searching,
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -704,8 +799,8 @@ fun ReaderScreen(
                         onValueChange = { v -> text = v.replace('\n', ' ') },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Numio.Amber,
-                            cursorColor = Numio.Amber,
+                            focusedBorderColor = Numio.AmberText,
+                            cursorColor = Numio.AmberText,
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -720,7 +815,7 @@ fun ReaderScreen(
                 TextButton(onClick = {
                     addReplace(sel, text.trim())
                     replacing = null
-                }) { Text("Replace", color = Numio.Amber) }
+                }) { Text("Replace", color = Numio.AmberText) }
             },
             dismissButton = {
                 TextButton(onClick = { replacing = null }) { Text("Cancel", color = Numio.TextDim) }
@@ -794,6 +889,8 @@ private fun Pages(
     look: PageLook,
     layout: PageLayout,
     selection: Selection?,
+    found: Map<Int, List<SearchHit>>,
+    activeHit: SearchHit?,
     edits: List<Edit>,
     focused: Long?,
     movable: Mark?,
@@ -1137,6 +1234,8 @@ private fun Pages(
                         preview = preview?.takeIf { it.page == index },
                         live = live?.takeIf { it.page == index },
                         scale = { scale },
+                        hits = found[index].orEmpty(),
+                        activeHit = activeHit?.takeIf { it.page == index },
                     )
                 }
             }
@@ -1159,6 +1258,8 @@ internal fun PageView(
     preview: Mark?,
     live: LiveStroke?,
     scale: () -> Float,
+    hits: List<SearchHit> = emptyList(),
+    activeHit: SearchHit? = null,
 ) {
     // Marks already saved in the file: Android's renderer doesn't draw them, so we do
     val saved by produceState(emptyList<Mark>(), index, doc) { value = doc.text.marks(index) }
@@ -1196,6 +1297,7 @@ internal fun PageView(
         val marks = if (preview == null) applied else applied.map { if (it.id == preview.id) preview else it }
         if (marks.isNotEmpty()) MarksOverlay(marks, focused, scale, look)
         if (live != null) LiveInk(live.points, live.pen.width, live.pen.color)
+        if (hits.isNotEmpty()) SearchOverlay(hits, activeHit, scale)
         if (!selected.isNullOrEmpty()) SelectionOverlay(selected, scale)
     }
 }
@@ -1209,6 +1311,7 @@ private fun TopBar(
     unsaved: Int,
     onBack: () -> Unit,
     onBookmark: () -> Unit,
+    onSearch: () -> Unit,
     onUndo: () -> Unit,
     onSave: () -> Unit,
     menu: @Composable () -> Unit,
@@ -1227,6 +1330,9 @@ private fun TopBar(
         Column(Modifier.weight(1f)) {
             Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("Page ${current + 1} of $count", style = MaterialTheme.typography.bodySmall)
+        }
+        IconButton(onClick = onSearch) {
+            Icon(PIcons.Search, contentDescription = "Find in this PDF", tint = Numio.Text)
         }
         if (unsaved > 0) {
             IconButton(onClick = onUndo) {
@@ -1247,7 +1353,7 @@ private fun TopBar(
                 Icon(
                     if (bookmarked) PIcons.BookmarkFilled else PIcons.Bookmark,
                     contentDescription = if (bookmarked) "Remove bookmark on this page" else "Bookmark this page",
-                    tint = if (bookmarked) Numio.Amber else Numio.Text,
+                    tint = if (bookmarked) Numio.AmberText else Numio.Text,
                 )
             }
         }
@@ -1350,7 +1456,7 @@ private fun StripPage(doc: PdfDoc, index: Int, selected: Boolean, onClick: () ->
         Box(
             Modifier
                 .size(width, height)
-                .then(if (selected) Modifier.border(2.dp, Numio.Amber, shape) else Modifier)
+                .then(if (selected) Modifier.border(2.dp, Numio.AmberText, shape) else Modifier)
                 .padding(if (selected) 3.dp else 0.dp)
                 .clip(shape)
                 .background(Numio.Paper),
@@ -1379,15 +1485,15 @@ private fun GoToPageDialog(count: Int, onDismiss: () -> Unit, onGo: (Int) -> Uni
                 label = { Text("Page 1 to $count") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Numio.Amber,
-                    focusedLabelColor = Numio.Amber,
-                    cursorColor = Numio.Amber,
+                    focusedBorderColor = Numio.AmberText,
+                    focusedLabelColor = Numio.AmberText,
+                    cursorColor = Numio.AmberText,
                 ),
             )
         },
         confirmButton = {
             TextButton(onClick = { number?.let { onGo(it - 1) } }, enabled = number != null) {
-                Text("Go", color = if (number != null) Numio.Amber else Numio.TextDim)
+                Text("Go", color = if (number != null) Numio.AmberText else Numio.TextDim)
             }
         },
         dismissButton = {

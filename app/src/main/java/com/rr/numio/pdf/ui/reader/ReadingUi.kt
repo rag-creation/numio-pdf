@@ -134,7 +134,7 @@ fun ReadingMenu(
         DropdownMenuItem(
             text = { Text(if (starred) "Remove star" else "Star this PDF") },
             leadingIcon = {
-                Icon(if (starred) PIcons.StarFilled else PIcons.Star, contentDescription = null, tint = if (starred) Numio.Amber else Numio.Text)
+                Icon(if (starred) PIcons.StarFilled else PIcons.Star, contentDescription = null, tint = if (starred) Numio.AmberText else Numio.Text)
             },
             onClick = { onDismiss(); onStar() },
         )
@@ -168,9 +168,9 @@ private fun MenuLabel(text: String) {
 @Composable
 private fun CheckItem(label: String, checked: Boolean, onClick: () -> Unit) {
     DropdownMenuItem(
-        text = { Text(label, color = if (checked) Numio.Amber else Numio.Text) },
+        text = { Text(label, color = if (checked) Numio.AmberText else Numio.Text) },
         leadingIcon = {
-            if (checked) Icon(PIcons.Check, contentDescription = "Selected", tint = Numio.Amber)
+            if (checked) Icon(PIcons.Check, contentDescription = "Selected", tint = Numio.AmberText)
             else Spacer(Modifier.size(24.dp))
         },
         onClick = onClick,
@@ -238,7 +238,7 @@ fun ContentsSheet(
                                     Text(
                                         "${e.page + 1}",
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = if (e.page == current) Numio.Amber else Numio.TextDim,
+                                        color = if (e.page == current) Numio.AmberText else Numio.TextDim,
                                     )
                                 }
                             }
@@ -251,9 +251,9 @@ fun ContentsSheet(
                     onClick = { onToggleBookmark(current) },
                     modifier = Modifier.padding(horizontal = 12.dp),
                 ) {
-                    Icon(if (here) PIcons.BookmarkFilled else PIcons.Bookmark, contentDescription = null, tint = Numio.Amber)
+                    Icon(if (here) PIcons.BookmarkFilled else PIcons.Bookmark, contentDescription = null, tint = Numio.AmberText)
                     Spacer(Modifier.width(8.dp))
-                    Text(if (here) "Remove bookmark on page ${current + 1}" else "Bookmark page ${current + 1}", color = Numio.Amber)
+                    Text(if (here) "Remove bookmark on page ${current + 1}" else "Bookmark page ${current + 1}", color = Numio.AmberText)
                 }
                 if (bookmarks.isEmpty()) {
                     Empty("No bookmarks yet. Tap the bookmark at the top while reading, or the button above.")
@@ -267,7 +267,7 @@ fun ContentsSheet(
                                     .padding(start = 20.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(PIcons.BookmarkFilled, contentDescription = null, tint = Numio.Amber, modifier = Modifier.size(18.dp))
+                                Icon(PIcons.BookmarkFilled, contentDescription = null, tint = Numio.AmberText, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(14.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(b.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -298,11 +298,11 @@ fun ContentsSheet(
                     value = name,
                     onValueChange = { name = it.replace('\n', ' ').take(80) },
                     singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Numio.Amber, cursorColor = Numio.Amber),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Numio.AmberText, cursorColor = Numio.AmberText),
                 )
             },
             confirmButton = {
-                TextButton(onClick = { onRename(b.page, name); renaming = null }) { Text("Save", color = Numio.Amber) }
+                TextButton(onClick = { onRename(b.page, name); renaming = null }) { Text("Save", color = Numio.AmberText) }
             },
             dismissButton = { TextButton(onClick = { renaming = null }) { Text("Cancel", color = Numio.TextDim) } },
         )

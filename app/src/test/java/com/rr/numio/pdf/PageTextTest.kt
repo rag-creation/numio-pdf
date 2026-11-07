@@ -77,4 +77,40 @@ class PageTextTest {
         val p = PageText(glyphs)
         assertEquals("ക്ഷമ", p.text(p.wordAt(0)))
     }
+
+    @Test
+    fun searchIgnoresCaseAndFindsEveryPlace() {
+        val p = page("The cat and the Cat", "THE end")
+        val hits = p.find("the")
+        assertEquals(3, hits.size)
+        assertEquals("The", p.text(hits[0]))
+        assertEquals("the", p.text(hits[1]))
+        assertEquals("THE", p.text(hits[2]))
+        assertEquals(2, p.find("  CAT ").size)
+    }
+
+    @Test
+    fun searchMatchesAcrossALineBreak() {
+        val p = page("first half", "second half")
+        val hits = p.find("half second")
+        assertEquals(1, hits.size)
+        assertEquals(2, p.lineBoxes(hits[0]).size) // lit on both lines
+    }
+
+    @Test
+    fun searchFindsNothingForBlankOrMissingWords() {
+        val p = page("hello world")
+        assertTrue(p.find("").isEmpty())
+        assertTrue(p.find("   ").isEmpty())
+        assertTrue(p.find("planet").isEmpty())
+        assertTrue(page().find("hello").isEmpty())
+    }
+
+    @Test
+    fun searchWorksForMalayalam() {
+        val p = page("ഗ്രന്ഥലോകം മാസിക")
+        val hits = p.find("മാസിക")
+        assertEquals(1, hits.size)
+        assertEquals("മാസിക", p.text(hits[0]))
+    }
 }

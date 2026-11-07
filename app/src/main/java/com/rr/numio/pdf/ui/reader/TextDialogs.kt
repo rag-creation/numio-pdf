@@ -68,8 +68,8 @@ fun WriteDialog(
                     maxLines = 8,
                     placeholder = { Text(if (initialSize == null) "Write a note" else "Type here") },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Numio.Amber,
-                        cursorColor = Numio.Amber,
+                        focusedBorderColor = Numio.AmberText,
+                        cursorColor = Numio.AmberText,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -152,7 +152,7 @@ fun WriteDialog(
         },
         confirmButton = {
             TextButton(onClick = { onDone(text.trimEnd(), color, size, fill) }, enabled = text.isNotBlank()) {
-                Text(if (isNew) "Add" else "Save", color = if (text.isNotBlank()) Numio.Amber else Numio.TextDim)
+                Text(if (isNew) "Add" else "Save", color = if (text.isNotBlank()) Numio.AmberText else Numio.TextDim)
             }
         },
         dismissButton = {

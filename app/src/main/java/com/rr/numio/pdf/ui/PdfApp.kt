@@ -115,7 +115,7 @@ fun PdfApp(
                             TextButton(onClick = {
                                 askLeave = false
                                 save(files.firstOrNull { it.uri == r.uri }?.lastPage ?: 0, r.name)
-                            }) { Text("Save", color = Numio.Amber) }
+                            }) { Text("Save", color = Numio.AmberText) }
                         },
                         dismissButton = {
                             TextButton(onClick = {
@@ -138,6 +138,8 @@ fun PdfApp(
                 SettingsScreen(
                     look = vm.look,
                     layout = vm.layout,
+                    theme = vm.appTheme,
+                    onTheme = vm::chooseTheme,
                     savedSignatures = signatureCount,
                     recentFiles = files.size,
                     onLook = vm::chooseLook,
@@ -169,7 +171,7 @@ fun PdfApp(
                 title = { Text("Couldn't open this PDF", style = MaterialTheme.typography.titleLarge) },
                 text = { Text(failed.message, style = MaterialTheme.typography.bodyLarge, color = Numio.TextDim) },
                 confirmButton = {
-                    TextButton(onClick = vm::closeReader) { Text("OK", color = Numio.Amber) }
+                    TextButton(onClick = vm::closeReader) { Text("OK", color = Numio.AmberText) }
                 },
                 dismissButton = if (failed.uri != null) {
                     { TextButton(onClick = { vm.remove(failed.uri) }) { Text("Remove from list", color = Numio.TextDim) } }
@@ -188,7 +190,7 @@ private fun Loading(name: String) {
         verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CircularProgressIndicator(color = Numio.Amber, strokeWidth = 3.dp, modifier = Modifier.size(36.dp))
+        CircularProgressIndicator(color = Numio.AmberText, strokeWidth = 3.dp, modifier = Modifier.size(36.dp))
         if (name.isNotEmpty()) {
             Text(name, style = MaterialTheme.typography.bodyMedium, color = Numio.TextDim, textAlign = TextAlign.Center)
         }
