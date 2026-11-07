@@ -501,7 +501,7 @@ fun BarAction(
     val tint = when {
         !enabled -> Numio.Line
         danger -> Numio.Error
-        highlight -> Numio.Amber
+        highlight -> Numio.AmberText
         else -> Numio.Text
     }
     Column(

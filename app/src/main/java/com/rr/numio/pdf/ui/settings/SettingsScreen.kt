@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import com.rr.numio.pdf.data.PageLayout
 import com.rr.numio.pdf.data.PageLook
 import com.rr.numio.pdf.ui.PIcons
+import com.rr.numio.pdf.ui.theme.AppTheme
 import com.rr.numio.pdf.ui.theme.Numio
 import kotlinx.coroutines.delay
 
@@ -52,6 +53,8 @@ import kotlinx.coroutines.delay
 fun SettingsScreen(
     look: PageLook,
     layout: PageLayout,
+    theme: AppTheme,
+    onTheme: (AppTheme) -> Unit,
     savedSignatures: Int,
     recentFiles: Int,
     onLook: (PageLook) -> Unit,
@@ -86,6 +89,14 @@ fun SettingsScreen(
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 32.dp),
         ) {
+            Section("Appearance")
+            Label("App theme")
+            Choices(
+                listOf(AppTheme.SYSTEM to "Phone", AppTheme.DARK to "Dark", AppTheme.LIGHT to "Light"),
+                theme, onTheme,
+            )
+            Hint("Phone follows your phone's dark mode. Book mode always stays dark.")
+
             Section("Reading")
             Label("Page colour")
             Choices(
@@ -180,7 +191,7 @@ fun SettingsScreen(
                     Text("Built by RR with help from Claude.", style = MaterialTheme.typography.bodySmall)
                 }
             },
-            confirmButton = { TextButton(onClick = { licences = false }) { Text("Close", color = Numio.Amber) } },
+            confirmButton = { TextButton(onClick = { licences = false }) { Text("Close", color = Numio.AmberText) } },
         )
     }
 }
@@ -206,7 +217,7 @@ private fun EasterEgg() {
             .padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(first.take(shown), style = MaterialTheme.typography.titleMedium, color = Numio.Amber)
+        Text(first.take(shown), style = MaterialTheme.typography.titleMedium, color = Numio.AmberText)
         Spacer(Modifier.height(6.dp))
         Text(second.take((shown - first.length).coerceAtLeast(0)), style = MaterialTheme.typography.bodyLarge)
     }

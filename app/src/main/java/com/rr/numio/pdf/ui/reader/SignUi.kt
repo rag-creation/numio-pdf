@@ -220,7 +220,7 @@ fun SignDialog(
                         onValueChange = { name = it.replace('\n', ' ') },
                         singleLine = true,
                         placeholder = { Text("Type your name") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Numio.Amber, cursorColor = Numio.Amber),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Numio.AmberText, cursorColor = Numio.AmberText),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     styles.forEach { (key, label) ->
@@ -230,7 +230,7 @@ fun SignDialog(
                                 .height(64.dp)
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(Paper)
-                                .then(if (key == style) Modifier.border(2.dp, Numio.Amber, RoundedCornerShape(16.dp)) else Modifier)
+                                .then(if (key == style) Modifier.border(2.dp, Numio.AmberText, RoundedCornerShape(16.dp)) else Modifier)
                                 .clickable(onClickLabel = label, role = Role.RadioButton) { style = key },
                         ) {
                             Canvas(Modifier.matchParentSize().padding(horizontal = 14.dp, vertical = 8.dp)) {
@@ -252,10 +252,10 @@ fun SignDialog(
                     }
                     when {
                         !unlocked -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                            Icon(PIcons.Lock, contentDescription = null, tint = Numio.Amber, modifier = Modifier.size(36.dp))
+                            Icon(PIcons.Lock, contentDescription = null, tint = Numio.AmberText, modifier = Modifier.size(36.dp))
                             Spacer(Modifier.height(8.dp))
                             Text("Saved signatures are locked", style = MaterialTheme.typography.titleSmall)
-                            TextButton(onClick = { unlock(context, onUnlocked) }) { Text("Unlock", color = Numio.Amber) }
+                            TextButton(onClick = { unlock(context, onUnlocked) }) { Text("Unlock", color = Numio.AmberText) }
                         }
                         saved.isEmpty() -> Text(
                             "No saved signatures yet. Draw or type one with “Save for next time” ticked.",

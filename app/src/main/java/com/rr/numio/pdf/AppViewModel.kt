@@ -17,6 +17,7 @@ import com.rr.numio.pdf.data.Bookmark
 import com.rr.numio.pdf.data.Bookmarks
 import com.rr.numio.pdf.data.PageLayout
 import com.rr.numio.pdf.data.PageLook
+import com.rr.numio.pdf.ui.theme.AppTheme
 import com.rr.numio.pdf.data.RecentStore
 import com.rr.numio.pdf.edit.Edit
 import com.rr.numio.pdf.edit.Edits
@@ -62,6 +63,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun chooseLayout(value: PageLayout) {
         layout = value
         readingPrefs.edit().putString("layout", value.name).apply()
+    }
+
+    /** Dark, light, or whatever the phone uses. */
+    var appTheme by mutableStateOf(
+        runCatching { AppTheme.valueOf(readingPrefs.getString("theme", null) ?: "") }.getOrDefault(AppTheme.SYSTEM),
+    )
+        private set
+
+    fun chooseTheme(value: AppTheme) {
+        appTheme = value
+        readingPrefs.edit().putString("theme", value.name).apply()
     }
 
     private val bookmarkPrefs = app.getSharedPreferences("bookmarks", android.content.Context.MODE_PRIVATE)

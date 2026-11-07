@@ -71,7 +71,8 @@ import com.rr.numio.pdf.edit.Edit
 import com.rr.numio.pdf.edit.Edits
 import com.rr.numio.pdf.pdf.PdfDoc
 import com.rr.numio.pdf.ui.PIcons
-import com.rr.numio.pdf.ui.theme.Numio
+import com.rr.numio.pdf.ui.theme.DarkFrame
+import com.rr.numio.pdf.ui.theme.Palette
 import kotlin.math.abs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -129,97 +130,100 @@ fun BookReader(
         if (locked) lockHint++ else onExit(pager.currentPage)
     }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFF0B0B0A))) {
-        HorizontalPager(
-            state = pager,
-            userScrollEnabled = !zoomed,
-            beyondViewportPageCount = 1,
-            key = { it },
-            modifier = Modifier.fillMaxSize(),
-        ) { index ->
-            // A little depth as pages turn: the outgoing page sinks back slightly
-            val offset = (pager.currentPage - index) + pager.currentPageOffsetFraction
-            BookPage(
-                doc = doc,
-                index = index,
-                look = look,
-                edits = edits,
-                fills = fills,
-                locked = locked,
-                onZoomed = { if (index == pager.currentPage) zoomed = it },
-                onTap = { if (locked) lockHint++ else bars = !bars },
-                modifier = Modifier.graphicsLayer {
-                    val t = abs(offset).coerceIn(0f, 1f)
-                    val s = 1f - 0.06f * t
-                    scaleX = s
-                    scaleY = s
-                    alpha = 1f - 0.25f * t
-                    transformOrigin = TransformOrigin(if (offset > 0) 1f else 0f, 0.5f)
-                },
-            )
-        }
-
-        // Small bar, only when asked for
-        AnimatedVisibility(
-            visible = bars && !locked,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter),
-        ) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xCC0F0F0E))
-                    .statusBarsPadding()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = { onExit(pager.currentPage) }) {
-                    Icon(PIcons.Back, contentDescription = "Leave book mode", tint = Numio.Text)
-                }
-                Text(
-                    name,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+    // Always dark, whatever the app theme: a dim frame around the page
+    DarkFrame {
+        Box(Modifier.fillMaxSize().background(Color(0xFF0B0B0A))) {
+            HorizontalPager(
+                state = pager,
+                userScrollEnabled = !zoomed,
+                beyondViewportPageCount = 1,
+                key = { it },
+                modifier = Modifier.fillMaxSize(),
+            ) { index ->
+                // A little depth as pages turn: the outgoing page sinks back slightly
+                val offset = (pager.currentPage - index) + pager.currentPageOffsetFraction
+                BookPage(
+                    doc = doc,
+                    index = index,
+                    look = look,
+                    edits = edits,
+                    fills = fills,
+                    locked = locked,
+                    onZoomed = { if (index == pager.currentPage) zoomed = it },
+                    onTap = { if (locked) lockHint++ else bars = !bars },
+                    modifier = Modifier.graphicsLayer {
+                        val t = abs(offset).coerceIn(0f, 1f)
+                        val s = 1f - 0.06f * t
+                        scaleX = s
+                        scaleY = s
+                        alpha = 1f - 0.25f * t
+                        transformOrigin = TransformOrigin(if (offset > 0) 1f else 0f, 0.5f)
+                    },
                 )
-                IconButton(onClick = {
-                    locked = true
-                    bars = false
-                    lockHint++
-                }) {
-                    Icon(PIcons.Lock, contentDescription = "Lock: only page swipes work", tint = Numio.Amber)
+            }
+
+            // Small bar, only when asked for
+            AnimatedVisibility(
+                visible = bars && !locked,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xCC0F0F0E))
+                        .statusBarsPadding()
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { onExit(pager.currentPage) }) {
+                        Icon(PIcons.Back, contentDescription = "Leave book mode", tint = Palette.Dark.text)
+                    }
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = {
+                        locked = true
+                        bars = false
+                        lockHint++
+                    }) {
+                        Icon(PIcons.Lock, contentDescription = "Lock: only page swipes work", tint = Palette.Dark.amber)
+                    }
                 }
             }
-        }
-        AnimatedVisibility(
-            visible = bars && !locked,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter),
-        ) {
-            Box(
-                Modifier
-                    .navigationBarsPadding()
-                    .padding(bottom = 18.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xCC2A2925))
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            AnimatedVisibility(
+                visible = bars && !locked,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter),
             ) {
-                Text("${pager.currentPage + 1} / $count", style = MaterialTheme.typography.labelMedium)
+                Box(
+                    Modifier
+                        .navigationBarsPadding()
+                        .padding(bottom = 18.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xCC2A2925))
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) {
+                    Text("${pager.currentPage + 1} / $count", style = MaterialTheme.typography.labelMedium)
+                }
             }
-        }
 
-        if (locked) {
-            UnlockButton(
-                hint = lockHint,
-                onUnlock = {
-                    locked = false
-                    bars = true
-                },
-                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 22.dp),
-            )
+            if (locked) {
+                UnlockButton(
+                    hint = lockHint,
+                    onUnlock = {
+                        locked = false
+                        bars = true
+                    },
+                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 22.dp),
+                )
+            }
         }
     }
 }
@@ -369,11 +373,11 @@ private fun UnlockButton(hint: Int, onUnlock: () -> Unit, modifier: Modifier) {
             ) {
                 Canvas(Modifier.size(56.dp)) {
                     drawArc(
-                        Numio.Amber, -90f, 360f * progress.value, false,
+                        Palette.Dark.amber, -90f, 360f * progress.value, false,
                         style = Stroke(3.dp.toPx()), size = Size(size.width, size.height),
                     )
                 }
-                Icon(PIcons.Lock, contentDescription = "Hold to unlock", tint = Numio.Amber)
+                Icon(PIcons.Lock, contentDescription = "Hold to unlock", tint = Palette.Dark.amber)
             }
             Text(
                 "Hold to unlock",

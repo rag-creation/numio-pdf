@@ -191,8 +191,8 @@ fun FieldTextDialog(field: FormField, current: String, onDone: (String) -> Unit,
                     minLines = if (field.multiline) 3 else 1,
                     keyboardOptions = KeyboardOptions(imeAction = if (field.multiline) ImeAction.Default else ImeAction.Done),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Numio.Amber,
-                        cursorColor = Numio.Amber,
+                        focusedBorderColor = Numio.AmberText,
+                        cursorColor = Numio.AmberText,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -202,7 +202,7 @@ fun FieldTextDialog(field: FormField, current: String, onDone: (String) -> Unit,
             }
         },
         confirmButton = {
-            TextButton(onClick = { onDone(text) }) { Text("Done", color = Numio.Amber) }
+            TextButton(onClick = { onDone(text) }) { Text("Done", color = Numio.AmberText) }
         },
         dismissButton = {
             Row {
@@ -236,7 +236,7 @@ fun FieldChoiceDialog(field: FormField, current: String, onDone: (String) -> Uni
                         RadioButton(
                             selected = option == current,
                             onClick = { onDone(option) },
-                            colors = RadioButtonDefaults.colors(selectedColor = Numio.Amber),
+                            colors = RadioButtonDefaults.colors(selectedColor = Numio.AmberText),
                         )
                         Text(option, style = MaterialTheme.typography.bodyLarge)
                     }

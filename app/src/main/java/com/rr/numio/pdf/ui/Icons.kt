@@ -79,6 +79,8 @@ object PIcons {
     val Contents = stroke("Contents", "M4.5 6h1M9 6h10.5M4.5 12h1M9 12h10.5M4.5 18h1M9 18h10.5")
     val Check = stroke("Check", "M5 12.5l4.5 4.5L19 7.5", width = 2.2f)
     val Chevron = stroke("Chevron", "M9 5l7 7l-7 7", width = 2f)
+    val Up = stroke("Up", "M5 15l7-7l7 7", width = 2f)
+    val Down = stroke("Down", "M5 9l7 7l7-7", width = 2f)
     val Settings = stroke(
         "Settings",
         "M12 9a3 3 0 1 1 0 6a3 3 0 1 1 0 -6z",

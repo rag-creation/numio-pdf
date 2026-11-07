@@ -45,13 +45,31 @@ class TextExtractor(private val context: Context, private val source: Uri) {
     private var doc: PDDocument? = null
     private var failed = false
     private var closed = false
-    private val pages = HashMap<Int, PageText>()
+    // The most recently used pages' text; older ones are read again if needed,
+    // so searching a thick book doesn't fill the phone's memory
+    private val pages = object : LinkedHashMap<Int, PageText>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, PageText>?) = size > 48
+    }
+    // Just the words of every page searched, small enough to keep for the whole book
+    private val words = HashMap<Int, String>()
     // Read from the screen thread for taps, so safe to share
     private val marks = java.util.concurrent.ConcurrentHashMap<Int, List<Mark>>()
 
     /** The page's text, or an empty page if it has none (a scan) or can't be read. */
     suspend fun page(index: Int): PageText = lock.withLock {
         pages[index] ?: withContext(Dispatchers.IO) { extract(index) }.also { pages[index] = it }
+    }
+
+    /**
+     * Where [query] (already normalised) is on a page. Pages searched before are
+     * checked from their kept words, without reading the PDF again.
+     */
+    suspend fun search(index: Int, query: String): PageSearch {
+        val known = lock.withLock { words[index] }
+        if (known != null && !known.contains(query)) return PageSearch(emptyList(), known.isNotEmpty())
+        val text = page(index)
+        lock.withLock { words[index] = text.searchText }
+        return PageSearch(text.find(query).map { SearchHit(index, it, text.lineBoxes(it)) }, !text.isEmpty)
     }
 
     // Form fields, read once for the whole document
@@ -102,6 +120,7 @@ class TextExtractor(private val context: Context, private val source: Uri) {
         lock.withLock {
             closed = true
             pages.clear()
+            words.clear()
             marks.clear()
             withContext(Dispatchers.IO) { runCatching { doc?.close() } }
             doc = null

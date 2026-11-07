@@ -182,7 +182,7 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
                 onValueChange = onChange,
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge,
-                cursorBrush = SolidColor(Numio.Amber),
+                cursorBrush = SolidColor(Numio.AmberText),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -281,7 +281,7 @@ private fun FileRow(
             Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
         }
         if (file.starred) {
-            Icon(PIcons.StarFilled, contentDescription = "Starred", tint = Numio.Amber, modifier = Modifier.size(16.dp))
+            Icon(PIcons.StarFilled, contentDescription = "Starred", tint = Numio.AmberText, modifier = Modifier.size(16.dp))
         }
         Box {
             IconButton(onClick = { menu = true }) {
@@ -312,7 +312,7 @@ private fun EmptyState() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(PIcons.Page, contentDescription = null, tint = Numio.Amber, modifier = Modifier.size(48.dp))
+        Icon(PIcons.Page, contentDescription = null, tint = Numio.AmberText, modifier = Modifier.size(48.dp))
         Text("No PDFs yet", style = MaterialTheme.typography.titleLarge)
         Text(
             "Open a PDF from your phone, or tap one in Files, WhatsApp or email and choose PDF Reader. " +

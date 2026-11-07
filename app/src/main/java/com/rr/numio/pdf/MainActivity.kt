@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handle(intent)
 
         setContent {
-            PdfReaderTheme {
+            PdfReaderTheme(theme = vm.appTheme) {
                 PdfApp(
                     vm = vm,
                     onOpenPicker = ::pick,

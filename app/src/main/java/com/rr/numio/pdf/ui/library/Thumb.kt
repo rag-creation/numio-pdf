@@ -36,7 +36,7 @@ fun Thumb(uri: String, width: Dp, height: Dp) {
             .size(width, height)
             .clip(shape)
             .background(if (bitmap != null) Numio.Paper else Numio.Surface)
-            .border(1.dp, Numio.SurfaceHigh, shape),
+            .border(1.dp, Numio.Line, shape),
         contentAlignment = Alignment.Center,
     ) {
         val b = bitmap
@@ -49,7 +49,7 @@ fun Thumb(uri: String, width: Dp, height: Dp) {
                 modifier = Modifier.size(width, height),
             )
         } else {
-            Icon(PIcons.Page, contentDescription = null, tint = Numio.Amber, modifier = Modifier.size(width * 0.45f))
+            Icon(PIcons.Page, contentDescription = null, tint = Numio.AmberText, modifier = Modifier.size(width * 0.45f))
         }
     }
 }
