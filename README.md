@@ -68,6 +68,7 @@ editing behind a subscription. PDF Reader is different:
 
 ### 🧰 Everything else
 - ✅ Opens PDFs from Files, WhatsApp, Gmail and other apps, and shares them on
+- ✅ **Password-locked PDFs** (bank statements, payslips): the password is never stored, and saving keeps the PDF locked
 - ✅ Undo for every change, and a reminder if you leave without saving
 - ✅ A little easter egg 🤫
 

@@ -30,6 +30,7 @@ import com.rr.numio.pdf.edit.PdfSaver
 import com.rr.numio.pdf.edit.SaveFailure
 import com.rr.numio.pdf.pdf.OpenFailure
 import com.rr.numio.pdf.pdf.PdfDoc
+import com.rr.numio.pdf.pdf.Unlock
 import com.rr.numio.pdf.pdf.Thumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -42,6 +43,8 @@ sealed interface ReaderState {
     data class Open(val doc: PdfDoc, val uri: String, val name: String, val startPage: Int) : ReaderState
     /** [uri] is set when the file is in the library, so it can be removed from there. */
     data class Failed(val message: String, val uri: String?) : ReaderState
+    /** Needs a password to open; [wrong] once a password didn't fit; [page] to open at. */
+    data class Locked(val uri: String, val name: String, val wrong: Boolean = false, val page: Int? = null) : ReaderState
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -137,25 +140,42 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         openedFromOutside = fromOutside
         openJob?.cancel()
         closeDoc()
+        Unlock.forget(getApplication())
         edits.clear()
         reader = ReaderState.Loading(store.get(key)?.name ?: "")
         openJob = viewModelScope.launch { load(uri, page = null) }
     }
 
-    /** Opens [uri]; [page] overrides the remembered reading place (after saving). */
-    private suspend fun load(uri: Uri, page: Int?) {
+    /**
+     * Opens [uri]; [page] overrides the remembered reading place (after saving);
+     * [password] for a locked PDF.
+     */
+    private suspend fun load(uri: Uri, page: Int?, password: String? = null) {
         val key = uri.toString()
         val ctx = getApplication<Application>()
         val (name, size) = withContext(Dispatchers.IO) { describe(uri) }
         reader = try {
-            val doc = PdfDoc.open(ctx, uri)
+            val doc = PdfDoc.open(ctx, uri, password)
             store.opened(key, name, size, doc.pageCount)
             if (page != null) store.setPage(key, page.coerceIn(0, doc.pageCount - 1))
             loadBookmarks(key)
             ReaderState.Open(doc, key, name, store.get(key)?.lastPage ?: 0)
         } catch (e: OpenFailure) {
-            ReaderState.Failed(e.message ?: "This file couldn't be opened.", key.takeIf { store.get(it) != null })
+            if (e.locked) {
+                ReaderState.Locked(key, name, wrong = e.wrongPassword, page = page)
+            } else {
+                ReaderState.Failed(e.message ?: "This file couldn't be opened.", key.takeIf { store.get(it) != null })
+            }
         }
+    }
+
+    /** Tries the password for the locked PDF waiting to open. */
+    fun unlock(password: String) {
+        val locked = reader as? ReaderState.Locked ?: return
+        if (password.isEmpty()) return
+        openJob?.cancel()
+        reader = ReaderState.Loading(locked.name)
+        openJob = viewModelScope.launch { load(Uri.parse(locked.uri), locked.page, password) }
     }
 
     // ---- Changes to marks not yet saved into the file
@@ -234,10 +254,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val ctx = getApplication<Application>()
             open.doc.close()
             try {
-                val missed = PdfSaver.save(ctx, open.doc.source, dest, plan)
+                val missed = PdfSaver.save(ctx, open.doc.source, dest, plan, open.doc.password)
                 edits.clear()
                 Thumbnails.forget(ctx, dest.toString())
-                load(dest, page)
+                load(dest, page, open.doc.password)
                 // Changes that couldn't be made stay on screen, to delete or try again
                 missed.forEach { m -> edits.add(Edit.Add(m)) }
                 val saved = if (target == null) "Saved" else "Saved as a new PDF"
@@ -248,7 +268,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: SaveFailure) {
                 notice = e.message
-                load(original, page) // the marks stay, so nothing is lost
+                load(original, page, open.doc.password) // the marks stay, so nothing is lost
             }
         }
     }
@@ -292,7 +312,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (organiser === org) org.add(AddedPdf(uri, name, doc)) else doc.close()
                 notice = if (doc.pageCount == 1) "Added 1 page from $name" else "Added ${doc.pageCount} pages from $name"
             } catch (e: OpenFailure) {
-                notice = e.message
+                notice = if (e.locked) "That PDF is locked with a password, so its pages can't be added yet." else e.message
             } finally {
                 organiseBusy = false
             }
@@ -308,7 +328,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             organiseBusy = true
             try {
-                PageWriter.write(getApplication(), open.doc.source, org.added.map { it.doc.source }, pages, target)
+                PageWriter.write(getApplication(), open.doc.source, org.added.map { it.doc.source }, pages, target, open.doc.password)
                 notice = if (pages.size == 1) "Saved 1 page as a new PDF" else "Saved ${pages.size} pages as a new PDF"
                 org.selected.clear()
             } catch (e: SaveFailure) {
@@ -340,17 +360,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val ctx = getApplication<Application>()
             open.doc.close()
             try {
-                PageWriter.write(ctx, open.doc.source, added, items, dest)
+                PageWriter.write(ctx, open.doc.source, added, items, dest, open.doc.password)
                 // Bookmarks follow their pages when the file itself changed
                 if (target == null) {
                     saveBookmarksFor(open.uri, bookmarks.mapNotNull { b -> moved[b.page]?.let { b.copy(page = it) } })
                 }
                 Thumbnails.forget(ctx, dest.toString())
-                load(dest, page)
+                load(dest, page, open.doc.password)
                 notice = if (target == null) "Saved" else "Saved as a new PDF"
             } catch (e: SaveFailure) {
                 notice = e.message
-                load(original, savePage)
+                load(original, savePage, open.doc.password)
             } finally {
                 org.added.forEach { it.doc.close() }
             }
@@ -361,6 +381,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         stopOrganising()
         openJob?.cancel()
         closeDoc()
+        Unlock.forget(getApplication())
         edits.clear()
         reader = ReaderState.Closed
         openedFromOutside = false
@@ -382,6 +403,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        Unlock.forget(getApplication())
         // viewModelScope is already cancelled here, so close straight away
         (reader as? ReaderState.Open)?.doc?.let { doc ->
             kotlinx.coroutines.runBlocking { doc.close() }

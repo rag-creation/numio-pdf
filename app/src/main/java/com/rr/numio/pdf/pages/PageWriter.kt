@@ -3,6 +3,7 @@ package com.rr.numio.pdf.pages
 import android.content.Context
 import android.net.Uri
 import com.rr.numio.pdf.edit.SaveFailure
+import com.rr.numio.pdf.pdf.Unlock
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.cos.COSArray
 import com.tom_roush.pdfbox.cos.COSBase
@@ -26,9 +27,10 @@ object PageWriter {
 
     /**
      * [source] is the open PDF, [added] the PDFs added to it (source 1, 2…),
-     * [items] the pages to write in order. The result goes to [target].
+     * [items] the pages to write in order. The result goes to [target], locked
+     * with [password] if the open PDF was (saving never removes a password).
      */
-    suspend fun write(context: Context, source: Uri, added: List<Uri>, items: List<PageItem>, target: Uri) =
+    suspend fun write(context: Context, source: Uri, added: List<Uri>, items: List<PageItem>, target: Uri, password: String? = null) =
         withContext(Dispatchers.IO) {
             if (items.isEmpty()) throw SaveFailure("A PDF needs at least one page.")
             val ctx = context.applicationContext
@@ -75,6 +77,7 @@ object PageWriter {
                     (form.getDictionaryObject(COSName.FIELDS) as? COSArray)?.let { prune(it, kept) }
                 }
 
+                if (password != null) Unlock.lockAgain(doc, password)
                 doc.save(temp)
                 val out = try {
                     ctx.contentResolver.openOutputStream(target, "wt")
