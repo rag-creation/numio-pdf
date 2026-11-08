@@ -62,6 +62,8 @@ editing behind a subscription. PDF Reader is different:
 - ✅ **Fill forms**: text boxes, tick boxes, choices (tested on US government forms)
 - ✅ **Sign**: draw, type in a handwriting style (Malayalam too), or reuse a saved signature
 - ✅ Saved signatures sit behind your **fingerprint or screen lock**
+- ✅ **Organise pages**: turn, delete, drag to reorder, extract pages to a new PDF,
+  and add the pages of another PDF (merge)
 - ✅ Saves into the original file when Android allows it, or as a new copy you place
 
 ### 🧰 Everything else

@@ -100,8 +100,14 @@ class PdfDoc private constructor(
         /**
          * Opens [uri]. A password-locked PDF needs [password]: it's unlocked into a
          * private working copy on this phone (Android's renderer can't read locked files).
+         * [copyName]: the working copy's file name, if one is needed (each open PDF needs its own).
          */
-        suspend fun open(context: Context, uri: Uri, password: String? = null): PdfDoc = withContext(Dispatchers.IO) {
+        suspend fun open(
+            context: Context,
+            uri: Uri,
+            password: String? = null,
+            copyName: String = "current.pdf",
+        ): PdfDoc = withContext(Dispatchers.IO) {
             if (password != null) {
                 val unlocked = Unlock.toCache(context, uri, password)
                 return@withContext try {
@@ -115,7 +121,7 @@ class PdfDoc private constructor(
             } catch (e: Unreadable) {
                 // Some apps (email, chat) hand over a stream Android's renderer can't
                 // jump around in. Copy it into the app's cache on this phone and try that.
-                val copy = copyToCache(context, uri) ?: throw OpenFailure(DAMAGED)
+                val copy = copyToCache(context, uri, copyName) ?: throw OpenFailure(DAMAGED)
                 try {
                     openDirect(context, Uri.fromFile(copy))
                 } catch (e2: Unreadable) {
@@ -173,11 +179,11 @@ class PdfDoc private constructor(
             return PdfDoc(fd, renderer, pages, TextExtractor(context.applicationContext, uri), uri, password)
         }
 
-        /** One working copy at a time; the last one is replaced. */
-        private fun copyToCache(context: Context, uri: Uri): java.io.File? {
+        /** One working copy per name; the last one with that name is replaced. */
+        private fun copyToCache(context: Context, uri: Uri, name: String): java.io.File? {
             return try {
                 val dir = java.io.File(context.cacheDir, "opened").apply { mkdirs() }
-                val file = java.io.File(dir, "current.pdf")
+                val file = java.io.File(dir, name)
                 val input = context.contentResolver.openInputStream(uri) ?: return null
                 input.use { stream -> file.outputStream().use { stream.copyTo(it) } }
                 file
