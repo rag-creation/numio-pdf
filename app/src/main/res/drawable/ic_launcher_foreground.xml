@@ -1,27 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Placeholder icon until RR draws the real one: a page with a folded
-     corner in Numio amber #FFC21A, three text lines and the cream Numio dot.
-     Kept in the middle (about 44 of 108) so zooming launchers show it whole. -->
+<!-- Generated: the soft Numio N on a PDF page. Drawn inside the 66dp safe circle. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <!-- Page outline with folded top-right corner -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFC21A"
-        android:strokeWidth="3.7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M40,33 H60 L70,43 V71 Q70,75 66,75 H40 Q36,75 36,71 V37 Q36,33 40,33 Z M60,33 V43 H70" />
-    <!-- Text lines -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFC21A"
-        android:strokeWidth="3.2"
-        android:strokeLineCap="round"
-        android:pathData="M43,52 H63 M43,59 H63 M43,66 H54" />
-    <!-- Numio dot -->
-    <path
-        android:fillColor="#FFF1EEE6"
-        android:pathData="M59,66 a3.2,3.2 0 1,1 6.4,0 a3.2,3.2 0 1,1 -6.4,0 Z" />
+    <path android:fillColor="#FFFFC21A" android:pathData="M37.39,29.00 H61.40 L74.56,42.16 V75.05 Q74.56,79.00 70.61,79.00 H37.39 Q33.44,79.00 33.44,75.05 V32.95 Q33.44,29.00 37.39,29.00 Z" />
+    <path android:strokeColor="#FF0F0F0E" android:strokeWidth="2.63" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M61.40,29.00 V39.86 Q61.40,42.16 63.70,42.16 H74.56" />
+    <path android:fillColor="#FF0F0F0E" android:strokeColor="#FF0F0F0E" android:strokeWidth="1.13" android:strokeLineJoin="round" android:pathData="M43.05,43.92 Q43.05,42.72 44.05,43.39 L49.77,47.21 Q50.77,47.88 49.80,48.59 L47.67,50.16 Q46.71,50.87 46.71,52.07 L46.71,56.72 Q46.71,57.92 45.51,57.92 L44.25,57.92 Q43.05,57.92 43.05,56.72 Z" />
+    <path android:fillColor="#FF0F0F0E" android:strokeColor="#FF0F0F0E" android:strokeWidth="1.13" android:strokeLineJoin="round" android:pathData="M54.96,44.25 Q54.96,43.06 56.15,43.06 L57.22,43.06 Q58.41,43.06 58.41,44.25 L58.41,56.59 Q58.41,57.79 57.43,57.10 L51.75,53.12 Q50.77,52.43 51.75,51.75 L53.97,50.22 Q54.96,49.54 54.96,48.34 Z" />
+    <path android:fillColor="#FF0F0F0E" android:pathData="M59.61,55.99 a2.13,2.13 0 1,1 4.26,0 a2.13,2.13 0 1,1 -4.26,0 Z" />
+    <path android:strokeColor="#FF5A5750" android:strokeWidth="0.73" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M44.05,44.72 L44.05,48.21 M56.02,44.22 L56.02,46.88" />
+    <path android:fillColor="#FF5A5750" android:pathData="M60.41,55.19 a0.60,0.60 0 1,1 1.20,0 a0.60,0.60 0 1,1 -1.20,0 Z" />
+    <path android:strokeColor="#FF0F0F0E" android:strokeWidth="2.14" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M44.46,67.16 V74.23 M44.46,67.16 H46.93 Q49.89,67.16 49.89,69.62 Q49.89,72.09 46.93,72.09 H44.46 M51.53,67.16 V74.23 H53.51 Q57.29,74.23 57.29,70.69 Q57.29,67.16 53.51,67.16 Z M59.76,67.16 V74.23 M59.76,67.16 H63.70 M59.76,70.61 H62.88" />
 </vector>
