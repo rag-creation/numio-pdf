@@ -6,6 +6,8 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import androidx.compose.runtime.LaunchedEffect
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -65,6 +67,10 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handle(intent)
 
         setContent {
+            // While the app lock is on, the recent-apps screen shows no picture of the PDF
+            LaunchedEffect(vm.appLock) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(!vm.appLock)
+            }
             PdfReaderTheme(theme = vm.appTheme) {
                 PdfApp(
                     vm = vm,
@@ -78,6 +84,25 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        vm.cameBack(System.currentTimeMillis())
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Turning the phone round isn't leaving
+        if (!isChangingConfigurations) vm.left(System.currentTimeMillis())
+    }
+
+    /** Every picker, share sheet and link goes through here: leaving on purpose. */
+    @Deprecated("Overridden only to notice the app sending the person elsewhere")
+    @Suppress("DEPRECATION")
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        vm.outing = true
+        super.startActivityForResult(intent, requestCode, options)
     }
 
     override fun onNewIntent(intent: Intent) {

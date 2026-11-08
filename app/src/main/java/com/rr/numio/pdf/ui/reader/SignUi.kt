@@ -1,11 +1,8 @@
 package com.rr.numio.pdf.ui.reader
 
-import android.app.KeyguardManager
+import com.rr.numio.pdf.security.DeviceLock
+
 import android.content.Context
-import android.hardware.biometrics.BiometricManager
-import android.hardware.biometrics.BiometricPrompt
-import android.os.Build
-import android.os.CancellationSignal
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -363,40 +360,6 @@ private fun SignaturePreview(sig: Signature) {
     }
 }
 
-/**
- * Asks for the phone's fingerprint, face or screen lock before showing saved
- * signatures. Phones with no screen lock (or Android older than 9) open
- * straight away, since there's nothing to check against.
- */
-private fun unlock(context: Context, onOk: () -> Unit) {
-    val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || keyguard?.isDeviceSecure != true) {
-        onOk()
-        return
-    }
-    val builder = BiometricPrompt.Builder(context)
-        .setTitle("Saved signatures")
-        .setSubtitle("Unlock to use your saved signatures")
-    when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
-            builder.setAllowedAuthenticators(
-                BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL,
-            )
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
-            @Suppress("DEPRECATION")
-            builder.setDeviceCredentialAllowed(true)
-        else -> builder.setNegativeButton("Cancel", context.mainExecutor) { _, _ -> }
-    }
-    try {
-        builder.build().authenticate(
-            CancellationSignal(),
-            context.mainExecutor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) = onOk()
-            },
-        )
-    } catch (e: Exception) {
-        // No fingerprint set up on an Android 9 phone with only a PIN: nothing to prompt with
-        onOk()
-    }
-}
+/** Asks for the phone's lock before showing saved signatures. */
+private fun unlock(context: Context, onOk: () -> Unit) =
+    DeviceLock.ask(context, "Saved signatures", "Unlock to use your saved signatures", onOk)

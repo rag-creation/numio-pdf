@@ -33,6 +33,7 @@ import com.rr.numio.pdf.ui.pages.OrganiseScreen
 import com.rr.numio.pdf.ui.reader.ReaderScreen
 import com.rr.numio.pdf.ui.settings.SettingsScreen
 import com.rr.numio.pdf.ui.theme.Numio
+import com.rr.numio.pdf.security.DeviceLock
 
 @Composable
 fun PdfApp(
@@ -59,12 +60,43 @@ fun PdfApp(
         if (vm.canWriteOriginal()) vm.save(null) else onSaveCopy(name)
     }
 
+    /** Asks for the phone's lock; [then] runs once it's given. */
+    fun guard(title: String, subtitle: String, then: () -> Unit) {
+        vm.outing = true // Android's PIN screen may take the app off screen for a moment
+        DeviceLock.ask(
+            context, title, subtitle,
+            // A fingerprint never leaves the app, so the grace for the PIN screen ends here,
+            // or the next real leaving would get 5 minutes instead of the chosen time
+            onOk = {
+                vm.outing = false
+                then()
+            },
+            onCancel = { vm.outing = false },
+        )
+    }
+
+    /** Private needs a screen lock on the phone to mean anything. */
+    fun needsScreenLock(): Boolean {
+        if (DeviceLock.available(context)) return false
+        vm.notice = "Set a screen lock on your phone (PIN, pattern or fingerprint) to use this."
+        return true
+    }
+
     val notice = vm.notice
     LaunchedEffect(notice) {
         if (notice != null) {
             Toast.makeText(context, notice, Toast.LENGTH_LONG).show()
             vm.notice = null
         }
+    }
+
+    // Locked: nothing of the library or the open PDF is drawn at all
+    if (vm.locked) {
+        LockScreen(
+            onUnlock = { guard("PDF Reader", "Unlock to open PDF Reader") { vm.unlocked() } },
+            onLeave = onLeave,
+        )
+        return
     }
 
     Box(Modifier.fillMaxSize().background(Numio.Bg)) {
@@ -155,6 +187,17 @@ fun PdfApp(
                 SettingsScreen(
                     look = vm.look,
                     layout = vm.layout,
+                    appLock = vm.appLock,
+                    lockAfter = vm.lockAfter,
+                    onAppLock = { on ->
+                        if (!needsScreenLock()) {
+                            guard(
+                                if (on) "Turn on the app lock" else "Turn off the app lock",
+                                "Confirm it's you",
+                            ) { vm.chooseAppLock(on) }
+                        }
+                    },
+                    onLockAfter = vm::chooseLockAfter,
                     theme = vm.appTheme,
                     onTheme = vm::chooseTheme,
                     savedSignatures = signatureCount,
@@ -171,6 +214,13 @@ fun PdfApp(
             } else {
                 LibraryScreen(
                     files = files,
+                    privateOpen = vm.privateOpen,
+                    onOpenPrivate = {
+                        if (!needsScreenLock()) guard("Private PDFs", "Unlock to see your private PDFs") { vm.privateOpen = true }
+                    },
+                    onSetPrivate = { f, value ->
+                        if (!value || !needsScreenLock()) vm.setPrivate(f.uri, value)
+                    },
                     onOpen = { vm.open(android.net.Uri.parse(it.uri), fromOutside = false) },
                     onOpenPicker = onOpenPicker,
                     onStar = { vm.toggleStar(it.uri) },

@@ -13,6 +13,8 @@ data class RecentFile(
     val lastOpened: Long = 0L,
     val starred: Boolean = false,
     val sizeBytes: Long = -1L,
+    /** Kept in Private: hidden from the library until unlocked with the phone's lock. */
+    val isPrivate: Boolean = false,
 )
 
 /**
@@ -32,6 +34,7 @@ object RecentCodec {
             f.lastOpened.toString(),
             if (f.starred) "1" else "0",
             f.sizeBytes.toString(),
+            if (f.isPrivate) "1" else "0",
         ).joinToString("\t")
     }
 
@@ -47,6 +50,8 @@ object RecentCodec {
                 lastOpened = p[4].toLong(),
                 starred = p[5] == "1",
                 sizeBytes = p[6].toLong(),
+                // Lists saved before Private existed have 7 fields
+                isPrivate = p.getOrNull(7) == "1",
             )
         } catch (e: IllegalArgumentException) {
             null // a damaged line is skipped, the rest of the library survives

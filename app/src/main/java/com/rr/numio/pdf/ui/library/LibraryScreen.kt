@@ -31,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,11 +51,14 @@ import com.rr.numio.pdf.data.RecentFile
 import com.rr.numio.pdf.ui.PIcons
 import com.rr.numio.pdf.ui.theme.Numio
 
-private enum class Filter(val label: String) { Recent("Recent"), Starred("Starred") }
+private enum class Filter(val label: String) { Recent("Recent"), Starred("Starred"), Private("Private") }
 
 @Composable
 fun LibraryScreen(
     files: List<RecentFile>,
+    privateOpen: Boolean,
+    onOpenPrivate: () -> Unit,
+    onSetPrivate: (RecentFile, Boolean) -> Unit,
     onOpen: (RecentFile) -> Unit,
     onOpenPicker: () -> Unit,
     onStar: (RecentFile) -> Unit,
@@ -65,13 +69,20 @@ fun LibraryScreen(
     var filter by rememberSaveable { mutableStateOf(Filter.Recent) }
     val now = remember(files) { System.currentTimeMillis() }
 
+    // Private closed again (left the app a while, or it locked): back to Recent
+    LaunchedEffect(privateOpen) {
+        if (!privateOpen && filter == Filter.Private) filter = Filter.Recent
+    }
+    // Private PDFs only show in the Private tab, and in search while Private is open
+    val everyday = Library.shown(files)
     val searching = query.isNotBlank()
     val shown = when {
-        searching -> Library.search(files, query)
-        filter == Filter.Starred -> Library.starred(files)
-        else -> Library.ordered(files)
+        searching -> Library.search(if (privateOpen) files else everyday, query)
+        filter == Filter.Private && privateOpen -> Library.privateFiles(files)
+        filter == Filter.Starred -> Library.starred(everyday)
+        else -> Library.ordered(everyday)
     }
-    val continueFile = if (searching) null else Library.ordered(files).firstOrNull()
+    val continueFile = if (searching || filter == Filter.Private) null else Library.ordered(everyday).firstOrNull()
 
     Box(Modifier.fillMaxSize().background(Numio.Bg)) {
         LazyColumn(
@@ -105,24 +116,38 @@ fun LibraryScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Filter.entries.forEach { f ->
-                                Chip(f.label, selected = f == filter, onClick = { filter = f })
+                                Chip(
+                                    f.label,
+                                    selected = f == filter,
+                                    locked = f == Filter.Private && !privateOpen,
+                                    onClick = {
+                                        if (f == Filter.Private && !privateOpen) onOpenPrivate() else filter = f
+                                    },
+                                )
                             }
                         }
                     }
                 } else {
                     item { SectionLabel(if (shown.isEmpty()) "No PDFs match “${query.trim()}”" else "Results") }
                 }
-                if (!searching && shown.isEmpty() && filter == Filter.Starred) {
+                if (!searching && shown.isEmpty() && filter != Filter.Recent) {
                     item {
                         Text(
-                            "Star a PDF to keep it here. Starred PDFs never drop off the list.",
+                            if (filter == Filter.Starred) "Star a PDF to keep it here. Starred PDFs never drop off the list."
+                            else "Nothing here yet. Tap ⋮ on a PDF and choose Move to Private to keep it here, behind your lock.",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
                         )
                     }
                 }
                 items(shown, key = { it.uri }) { f ->
-                    FileRow(f, now, onClick = { onOpen(f) }, onStar = { onStar(f) }, onRemove = { onRemove(f) })
+                    FileRow(
+                        f, now,
+                        onClick = { onOpen(f) },
+                        onStar = { onStar(f) },
+                        onPrivate = { onSetPrivate(f, !f.isPrivate) },
+                        onRemove = { onRemove(f) },
+                    )
                 }
             }
         }
@@ -238,17 +263,19 @@ private fun ContinueCard(file: RecentFile, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun Chip(label: String, selected: Boolean, locked: Boolean = false, onClick: () -> Unit) {
     val shape = RoundedCornerShape(18.dp)
-    Box(
+    Row(
         Modifier
             .height(36.dp)
             .clip(shape)
             .then(if (selected) Modifier.background(Numio.Text) else Modifier.border(1.dp, Numio.Line, shape))
-            .clickable(role = Role.Tab, onClick = onClick)
+            .clickable(role = Role.Tab, onClickLabel = if (locked) "Unlock" else null, onClick = onClick)
             .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.Center,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        if (locked) Icon(PIcons.Lock, contentDescription = "Locked", tint = Numio.TextDim, modifier = Modifier.size(14.dp))
         Text(label, style = MaterialTheme.typography.labelLarge, color = if (selected) Numio.Bg else Numio.Text)
     }
 }
@@ -259,6 +286,7 @@ private fun FileRow(
     now: Long,
     onClick: () -> Unit,
     onStar: () -> Unit,
+    onPrivate: () -> Unit,
     onRemove: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -295,6 +323,10 @@ private fun FileRow(
                 DropdownMenuItem(
                     text = { Text(if (file.starred) "Remove star" else "Star") },
                     onClick = { menu = false; onStar() },
+                )
+                DropdownMenuItem(
+                    text = { Text(if (file.isPrivate) "Move out of Private" else "Move to Private") },
+                    onClick = { menu = false; onPrivate() },
                 )
                 DropdownMenuItem(
                     text = { Text("Remove from list") },
