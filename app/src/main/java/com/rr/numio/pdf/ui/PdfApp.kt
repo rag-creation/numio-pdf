@@ -63,7 +63,16 @@ fun PdfApp(
     /** Asks for the phone's lock; [then] runs once it's given. */
     fun guard(title: String, subtitle: String, then: () -> Unit) {
         vm.outing = true // Android's PIN screen may take the app off screen for a moment
-        DeviceLock.ask(context, title, subtitle, onOk = then)
+        DeviceLock.ask(
+            context, title, subtitle,
+            // A fingerprint never leaves the app, so the grace for the PIN screen ends here,
+            // or the next real leaving would get 5 minutes instead of the chosen time
+            onOk = {
+                vm.outing = false
+                then()
+            },
+            onCancel = { vm.outing = false },
+        )
     }
 
     /** Private needs a screen lock on the phone to mean anything. */
