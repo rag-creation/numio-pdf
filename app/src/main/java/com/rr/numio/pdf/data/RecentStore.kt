@@ -23,6 +23,8 @@ class RecentStore(context: Context) {
 
     fun toggleStar(uri: String) = save(Library.toggleStar(_files.value, uri))
 
+    fun setPrivate(uri: String, value: Boolean) = save(Library.setPrivate(_files.value, uri, value))
+
     fun remove(uri: String) = save(Library.remove(_files.value, uri))
 
     fun clear() = save(emptyList())

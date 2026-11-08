@@ -31,6 +31,8 @@ import com.rr.numio.pdf.edit.SaveFailure
 import com.rr.numio.pdf.pdf.OpenFailure
 import com.rr.numio.pdf.pdf.PdfDoc
 import com.rr.numio.pdf.pdf.Unlock
+import com.rr.numio.pdf.security.AppLock
+import com.rr.numio.pdf.security.LockAfter
 import com.rr.numio.pdf.pdf.Thumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -70,6 +72,65 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun chooseLayout(value: PageLayout) {
         layout = value
         readingPrefs.edit().putString("layout", value.name).apply()
+    }
+
+    // ---- App lock and Private
+
+    private val lockPrefs = app.getSharedPreferences("lock", android.content.Context.MODE_PRIVATE)
+
+    /** Ask for the phone's lock when PDF Reader opens or comes back. */
+    var appLock by mutableStateOf(lockPrefs.getBoolean("on", false))
+        private set
+
+    var lockAfter by mutableStateOf(
+        runCatching { LockAfter.valueOf(lockPrefs.getString("after", null) ?: "") }.getOrDefault(LockAfter.MINUTE),
+    )
+        private set
+
+    /** Showing the lock screen; starts locked when the lock is on. */
+    var locked by mutableStateOf(appLock)
+        private set
+
+    /** Private PDFs unlocked for now. */
+    var privateOpen by mutableStateOf(false)
+
+    private var leftAt = 0L
+
+    /** The app sent the person somewhere on purpose (a file picker, sharing, the PIN screen). */
+    var outing = false
+
+    fun setAppLock(on: Boolean) {
+        appLock = on
+        lockPrefs.edit().putBoolean("on", on).apply()
+    }
+
+    fun chooseLockAfter(value: LockAfter) {
+        lockAfter = value
+        lockPrefs.edit().putString("after", value.name).apply()
+    }
+
+    fun unlocked() {
+        locked = false
+        outing = false
+    }
+
+    /** PDF Reader went to the background. */
+    fun left(now: Long) {
+        leftAt = now
+    }
+
+    /** PDF Reader is on screen again: lock it, or close Private, if away long enough. */
+    fun cameBack(now: Long) {
+        val lock = AppLock.shouldLock(appLock, lockAfter, leftAt, now, outing)
+        if (lock) locked = true
+        if (AppLock.shouldClosePrivate(lock, leftAt, now, outing)) privateOpen = false
+        outing = false
+        leftAt = 0L
+    }
+
+    fun setPrivate(uri: String, value: Boolean) {
+        store.setPrivate(uri, value)
+        notice = if (value) "Moved to Private" else "Moved out of Private"
     }
 
     /** Dark, light, or whatever the phone uses. */

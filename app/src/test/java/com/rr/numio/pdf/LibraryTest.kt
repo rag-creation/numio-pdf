@@ -88,4 +88,36 @@ class LibraryTest {
         assertEquals("1 page", Library.pagesLabel(1))
         assertEquals("18 pages", Library.pagesLabel(18))
     }
+
+    @Test
+    fun privateFilesAreHiddenAndKept() {
+        var files = listOf(file("a", 3), file("b", 2), file("c", 1))
+        files = Library.setPrivate(files, "b", true)
+        assertEquals(listOf("a", "c"), Library.ordered(Library.shown(files)).map { it.uri })
+        assertEquals(listOf("b"), Library.privateFiles(files).map { it.uri })
+        // Reading it again keeps it private
+        files = Library.opened(files, "b", "b.pdf", 10, 10, now = 9)
+        assertTrue(files.first { it.uri == "b" }.isPrivate)
+        // Back out of Private
+        files = Library.setPrivate(files, "b", false)
+        assertTrue(Library.privateFiles(files).isEmpty())
+    }
+
+    @Test
+    fun privateFilesNeverDropOffTheList() {
+        var files = listOf(file("old", 0).copy(isPrivate = true))
+        for (i in 1..Library.MAX_RECENT + 5) files = Library.opened(files, "f$i", "f$i.pdf", 1, 1, now = i.toLong())
+        assertTrue(files.any { it.uri == "old" })
+    }
+
+    @Test
+    fun codecKeepsPrivateAndReadsOldLists() {
+        val f = RecentFile("content://p", "bank.pdf", 3, 1, 7L, false, 99L, isPrivate = true)
+        assertEquals(listOf(f), RecentCodec.decode(RecentCodec.encode(listOf(f))))
+        // A line saved before Private existed (7 fields) still reads, as not private
+        val old = "content%3A%2F%2Fo\to.pdf\t1\t0\t5\t0\t10"
+        val read = RecentCodec.decode(old)
+        assertEquals(1, read.size)
+        assertFalse(read[0].isPrivate)
+    }
 }

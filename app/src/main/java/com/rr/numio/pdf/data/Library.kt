@@ -9,13 +9,21 @@ import java.util.Locale
 
 /** Library rules, kept free of Android so they can be unit-tested. */
 object Library {
-    /** Unstarred files beyond this many are dropped, oldest first. Starred ones always stay. */
+    /** Unstarred files beyond this many are dropped, oldest first. Starred and private ones always stay. */
     const val MAX_RECENT = 100
 
     /** Newest first, starred or not. */
     fun ordered(files: List<RecentFile>): List<RecentFile> = files.sortedByDescending { it.lastOpened }
 
     fun starred(files: List<RecentFile>): List<RecentFile> = ordered(files).filter { it.starred }
+
+    /** Everything except Private: what Recent, Starred, Continue reading and search see. */
+    fun shown(files: List<RecentFile>): List<RecentFile> = files.filterNot { it.isPrivate }
+
+    fun privateFiles(files: List<RecentFile>): List<RecentFile> = ordered(files).filter { it.isPrivate }
+
+    fun setPrivate(files: List<RecentFile>, uri: String, value: Boolean): List<RecentFile> =
+        files.map { if (it.uri == uri) it.copy(isPrivate = value) else it }
 
     /** Adds or refreshes a file and moves it to the top, keeping its star and reading place. */
     fun opened(
@@ -35,6 +43,7 @@ object Library {
             lastOpened = now,
             starred = old?.starred ?: false,
             sizeBytes = sizeBytes,
+            isPrivate = old?.isPrivate ?: false,
         )
         return trim(listOf(fresh) + files.filter { it.uri != uri })
     }
@@ -49,7 +58,7 @@ object Library {
 
     private fun trim(files: List<RecentFile>): List<RecentFile> {
         var unstarred = 0
-        return ordered(files).filter { it.starred || ++unstarred <= MAX_RECENT }
+        return ordered(files).filter { it.starred || it.isPrivate || ++unstarred <= MAX_RECENT }
     }
 
     /** Every word typed must appear in the name, in any order, ignoring case. */

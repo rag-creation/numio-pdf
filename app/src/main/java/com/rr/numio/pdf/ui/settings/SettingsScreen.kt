@@ -45,6 +45,10 @@ import androidx.compose.ui.unit.dp
 import com.rr.numio.pdf.data.PageLayout
 import com.rr.numio.pdf.data.PageLook
 import com.rr.numio.pdf.ui.PIcons
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import com.rr.numio.pdf.security.LockAfter
 import com.rr.numio.pdf.ui.theme.AppTheme
 import com.rr.numio.pdf.ui.theme.Numio
 import kotlinx.coroutines.delay
@@ -55,6 +59,10 @@ fun SettingsScreen(
     layout: PageLayout,
     theme: AppTheme,
     onTheme: (AppTheme) -> Unit,
+    appLock: Boolean,
+    lockAfter: LockAfter,
+    onAppLock: (Boolean) -> Unit,
+    onLockAfter: (LockAfter) -> Unit,
     savedSignatures: Int,
     recentFiles: Int,
     onLook: (PageLook) -> Unit,
@@ -117,6 +125,21 @@ fun SettingsScreen(
             Hint(
                 "PDF Reader has no internet permission: nothing you open, mark or sign ever leaves this phone. " +
                     "It only sees the files you open with it.",
+            )
+            Toggle(
+                title = "App lock",
+                detail = "Ask for your fingerprint or screen lock to open PDF Reader",
+                on = appLock,
+                onChange = onAppLock,
+            )
+            if (appLock) {
+                Label("Lock again after leaving for")
+                Choices(LockAfter.entries.map { it to it.label }, lockAfter, onLockAfter)
+                Hint("While it's locked, the recent-apps screen doesn't show your PDF.")
+            }
+            Hint(
+                "Private PDFs: in the library, tap ⋮ on a PDF and choose Move to Private. " +
+                    "They're hidden from Recent, Starred and search, and the Private tab asks for your lock.",
             )
             Item(
                 title = "Clear the recent list",
@@ -262,6 +285,34 @@ private fun <T> Choices(options: List<Pair<T, String>>, selected: T, onPick: (T)
                 Text(label, style = MaterialTheme.typography.labelLarge, color = if (on) Numio.OnAmber else Numio.Text)
             }
         }
+    }
+}
+
+@Composable
+private fun Toggle(title: String, detail: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .toggleable(value = on, role = Role.Switch, onValueChange = onChange)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(detail, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(
+            checked = on,
+            onCheckedChange = null,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Numio.OnAmber,
+                checkedTrackColor = Numio.Amber,
+                uncheckedThumbColor = Numio.TextDim,
+                uncheckedTrackColor = Numio.Surface,
+                uncheckedBorderColor = Numio.Line,
+            ),
+        )
     }
 }
 
