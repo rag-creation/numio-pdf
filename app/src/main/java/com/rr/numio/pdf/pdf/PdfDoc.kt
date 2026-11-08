@@ -18,8 +18,11 @@ data class PageSize(val width: Int, val height: Int) {
     val aspect: Float get() = if (width <= 0) 1.414f else height.toFloat() / width
 }
 
-/** Why a file couldn't be opened, in words for the person, not an exception. */
-class OpenFailure(message: String) : Exception(message)
+/**
+ * Why a file couldn't be opened, in words for the person, not an exception.
+ * [locked]: it needs a password; [wrongPassword]: the one given didn't fit.
+ */
+class OpenFailure(message: String, val locked: Boolean = false, val wrongPassword: Boolean = false) : Exception(message)
 
 /**
  * One open PDF, drawn by Android's own renderer (android.graphics.pdf), so no
@@ -34,6 +37,11 @@ class PdfDoc private constructor(
     val text: TextExtractor,
     /** What was actually opened: the file itself, or the app's working copy of it. */
     val source: Uri,
+    /**
+     * The password it was unlocked with, kept only in memory while it's open,
+     * so saving can lock it again with the same one. Null for unlocked PDFs.
+     */
+    val password: String? = null,
 ) {
     val pageCount: Int get() = pages.size
 
@@ -89,7 +97,19 @@ class PdfDoc private constructor(
         /** Big enough for a sharp zoomed page, small enough not to run out of memory. */
         const val MAX_SIDE = 4096
 
-        suspend fun open(context: Context, uri: Uri): PdfDoc = withContext(Dispatchers.IO) {
+        /**
+         * Opens [uri]. A password-locked PDF needs [password]: it's unlocked into a
+         * private working copy on this phone (Android's renderer can't read locked files).
+         */
+        suspend fun open(context: Context, uri: Uri, password: String? = null): PdfDoc = withContext(Dispatchers.IO) {
+            if (password != null) {
+                val unlocked = Unlock.toCache(context, uri, password)
+                return@withContext try {
+                    openDirect(context, Uri.fromFile(unlocked), password)
+                } catch (e: Unreadable) {
+                    throw OpenFailure(DAMAGED)
+                }
+            }
             try {
                 openDirect(context, uri)
             } catch (e: Unreadable) {
@@ -109,7 +129,7 @@ class PdfDoc private constructor(
         /** The renderer couldn't read the file as it was handed over. */
         private class Unreadable : Exception()
 
-        private fun openDirect(context: Context, uri: Uri): PdfDoc {
+        private fun openDirect(context: Context, uri: Uri, password: String? = null): PdfDoc {
             val fd = try {
                 context.contentResolver.openFileDescriptor(uri, "r")
             } catch (e: SecurityException) {
@@ -124,7 +144,7 @@ class PdfDoc private constructor(
                 PdfRenderer(fd)
             } catch (e: SecurityException) {
                 runCatching { fd.close() }
-                throw OpenFailure("This PDF is locked with a password. Password-protected PDFs aren't supported yet.")
+                throw OpenFailure("This PDF is locked with a password.", locked = true)
             } catch (e: Exception) {
                 runCatching { fd.close() }
                 throw Unreadable()
@@ -150,7 +170,7 @@ class PdfDoc private constructor(
                 runCatching { fd.close() }
                 throw OpenFailure("This PDF has no pages.")
             }
-            return PdfDoc(fd, renderer, pages, TextExtractor(context.applicationContext, uri), uri)
+            return PdfDoc(fd, renderer, pages, TextExtractor(context.applicationContext, uri), uri, password)
         }
 
         /** One working copy at a time; the last one is replaced. */

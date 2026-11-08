@@ -163,6 +163,16 @@ fun PdfApp(
             }
         }
 
+        val locked = vm.reader as? ReaderState.Locked
+        if (locked != null) {
+            PasswordDialog(
+                name = locked.name,
+                wrong = locked.wrong,
+                onOpen = vm::unlock,
+                onCancel = ::back,
+            )
+        }
+
         val failed = vm.reader as? ReaderState.Failed
         if (failed != null) {
             AlertDialog(
