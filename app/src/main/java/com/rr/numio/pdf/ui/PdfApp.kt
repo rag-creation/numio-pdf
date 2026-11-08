@@ -185,7 +185,7 @@ fun PdfApp(
                             guard(
                                 if (on) "Turn on the app lock" else "Turn off the app lock",
                                 "Confirm it's you",
-                            ) { vm.setAppLock(on) }
+                            ) { vm.chooseAppLock(on) }
                         }
                     },
                     onLockAfter = vm::chooseLockAfter,

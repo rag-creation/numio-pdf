@@ -99,7 +99,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** The app sent the person somewhere on purpose (a file picker, sharing, the PIN screen). */
     var outing = false
 
-    fun setAppLock(on: Boolean) {
+    fun chooseAppLock(on: Boolean) {
         appLock = on
         lockPrefs.edit().putBoolean("on", on).apply()
     }
