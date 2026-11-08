@@ -116,6 +116,7 @@ fun ReadingMenu(
     onDismiss: () -> Unit,
     onContents: () -> Unit,
     onMarks: () -> Unit,
+    onOrganise: () -> Unit,
     onLook: (PageLook) -> Unit,
     onLayout: (PageLayout) -> Unit,
     onGoTo: () -> Unit,
@@ -131,6 +132,11 @@ fun ReadingMenu(
             text = { Text("Marks: highlights, notes…") },
             leadingIcon = { Icon(PIcons.Highlight, contentDescription = null, tint = Numio.Text) },
             onClick = { onDismiss(); onMarks() },
+        )
+        DropdownMenuItem(
+            text = { Text("Organise pages") },
+            leadingIcon = { Icon(PIcons.Pages, contentDescription = null, tint = Numio.Text) },
+            onClick = { onDismiss(); onOrganise() },
         )
         DropdownMenuItem(
             text = { Text("Go to page") },

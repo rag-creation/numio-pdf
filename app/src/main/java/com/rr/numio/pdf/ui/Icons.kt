@@ -79,6 +79,28 @@ object PIcons {
     val Contents = stroke("Contents", "M4.5 6h1M9 6h10.5M4.5 12h1M9 12h10.5M4.5 18h1M9 18h10.5")
     val Check = stroke("Check", "M5 12.5l4.5 4.5L19 7.5", width = 2.2f)
     val Chevron = stroke("Chevron", "M9 5l7 7l-7 7", width = 2f)
+    val RotateRight = stroke("RotateRight", "M19 12a7 7 0 1 1-2.05-4.95", "M16.95 3.3V7.05H13.2")
+    val RotateLeft = stroke("RotateLeft", "M5 12a7 7 0 1 0 2.05-4.95", "M7.05 3.3V7.05H10.8")
+    val Extract = stroke(
+        "Extract",
+        "M13 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V12",
+        "M12 12l8.5-8.5M15 3.5h5.5V9",
+    )
+    val Pages = stroke(
+        "Pages",
+        "M8 3.5h8.5A1.5 1.5 0 0 1 18 5v11.5A1.5 1.5 0 0 1 16.5 18H8A1.5 1.5 0 0 1 6.5 16.5V5A1.5 1.5 0 0 1 8 3.5z",
+        "M18 7h.5A1.5 1.5 0 0 1 20 8.5v11a1.5 1.5 0 0 1-1.5 1.5H11a1.5 1.5 0 0 1-1.5-1.5V18",
+    )
+    val Eye = stroke(
+        "Eye",
+        "M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z",
+        "M12 9.2a2.8 2.8 0 1 0 0 5.6a2.8 2.8 0 1 0 0-5.6z",
+    )
+    val EyeOff = stroke(
+        "EyeOff",
+        "M9.9 5.8A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.6 3.4M6.6 6.9C4 8.6 2.5 12 2.5 12s3.5 6.5 9.5 6.5c1.7 0 3.2-.5 4.5-1.2",
+        "M3.5 3.5l17 17",
+    )
     val Up = stroke("Up", "M5 15l7-7l7 7", width = 2f)
     val Down = stroke("Down", "M5 9l7 7l7-7", width = 2f)
     val Settings = stroke(

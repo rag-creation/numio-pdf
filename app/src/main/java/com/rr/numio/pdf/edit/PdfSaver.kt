@@ -3,6 +3,7 @@ package com.rr.numio.pdf.edit
 import android.content.Context
 import android.net.Uri
 import com.rr.numio.pdf.text.TextExtractor
+import com.rr.numio.pdf.pdf.Unlock
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -47,7 +48,8 @@ object PdfSaver {
      * wasn't found in the page, e.g. it's part of an image). Everything else
      * is saved.
      */
-    suspend fun save(context: Context, source: Uri, target: Uri, plan: SavePlan): List<Mark> = withContext(Dispatchers.IO) {
+    /** [password]: lock the saved PDF with it again (the PDF was opened with it). */
+    suspend fun save(context: Context, source: Uri, target: Uri, plan: SavePlan, password: String? = null): List<Mark> = withContext(Dispatchers.IO) {
         val ctx = context.applicationContext
         val missed = ArrayList<Mark>()
         PDFBoxResourceLoader.init(ctx)
@@ -113,6 +115,7 @@ object PdfSaver {
                         page.annotations = annotations
                     }
                     if (plan.fills.isNotEmpty()) fill(it, plan.fills)
+                    if (password != null) Unlock.lockAgain(it, password)
                     it.save(temp)
                 }
             }
